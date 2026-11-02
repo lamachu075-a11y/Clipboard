@@ -497,3 +497,9 @@ dialog.sheet { padding: 8px 12px 12px; width: min(420px, calc(100vw - 32px)); }
 #table td.cell.editing { padding: 3px 4px; }
 #table td.cell.editing input { width: 100%; min-width: 8em; padding: 4px 6px; }
 .loading { padding: 40px 16px; text-align: center; color: var(--muted); }
+
+/* start / stop automatic reading */
+button.autoread-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); font-weight: 600; }
+button.autoread-stop:hover { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+button.autoread-start { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); font-weight: 600; }
+button.autoread-start:hover { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); }

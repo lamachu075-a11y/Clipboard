@@ -13,6 +13,8 @@ code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in y
 - **Auto-read clipboard switch (ON/OFF)** at the top of the page and in the admin panel. When ON,
   new clipboard text is read automatically; when OFF, nothing is read until you press Ctrl/⌘+V or
   click *Read clipboard*. Turning it ON in Chrome/Edge asks for clipboard permission right away.
+- **Stop / Start auto-read button** in the toolbar (also first in the phone's *More* menu, and
+  **Alt+Shift+A** on the keyboard) switches automatic reading off and on. It stays off after a reload.
 - **Automatic clipboard reading.** Copy text anywhere, switch back to the app's tab, and the new
   data is already in the table. While the tab is focused it also checks the clipboard every second.
 - **Ctrl/⌘ + V anywhere on the page** adds whatever you paste. This works in every browser.

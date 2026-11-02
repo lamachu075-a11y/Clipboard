@@ -306,6 +306,20 @@ function TablePage() {
     setTimeout(() => readRef.current(), 0);
   };
 
+  // Alt+Shift+A starts / stops automatic reading.
+  const setEnabledRef = useRef(setEnabled);
+  setEnabledRef.current = setEnabled;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyA') {
+        e.preventDefault();
+        setEnabledRef.current(!Store.getSettings().enabled);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   // ---------- table ----------
 
   const visible = useMemo(() => {
@@ -498,6 +512,9 @@ function TablePage() {
 
   /** "More" sheet entries: icon, label, action, test id. */
   const moreItems: [string, string, () => unknown, string?][] = [
+    settings.enabled
+      ? ['⏸', 'Stop auto-read', () => setEnabled(false), 'stop-autoread']
+      : ['▶', 'Start auto-read', () => setEnabled(true), 'start-autoread'],
     ['＋', 'New project', () => setNewOpen(true)],
     ...(mode === 'auto' ? [['↻', 'Read clipboard again', () => readClipboard(true)] as [string, string, () => unknown]] : []),
     ['⇩', 'Download PDF', () => runDownload('pdf'), 'pdf'],
@@ -570,6 +587,15 @@ function TablePage() {
               Save project
             </button>
           </div>
+          <button
+            id="autoReadButton"
+            className={settings.enabled ? 'autoread-stop' : 'autoread-start'}
+            aria-pressed={settings.enabled}
+            title={settings.enabled ? 'Stop reading the clipboard automatically (Alt+Shift+A)' : 'Start reading the clipboard automatically (Alt+Shift+A)'}
+            onClick={() => setEnabled(!settings.enabled)}
+          >
+            {settings.enabled ? '⏸ Stop auto-read' : '▶ Start auto-read'}
+          </button>
           {mode === 'auto' ? (
             <button id="readNow" title="Read the clipboard now, even if it was already captured" onClick={() => readClipboard(true)}>
               Read clipboard
