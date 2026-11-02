@@ -15,28 +15,30 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-function crc32(bytes) {
+function crc32(bytes: Uint8Array): number {
   let c = 0xffffffff;
   for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function dosDateTime(d) {
+function dosDateTime(d: Date): { time: number; date: number } {
   const time = (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2);
   const date = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
   return { time, date };
 }
 
-/**
- * @param {Array<{name: string, data: string|Uint8Array|ArrayBuffer}>} files
- * @param {Date} [when]
- * @returns {Uint8Array} zip file bytes
- */
-function create(files, when = new Date()) {
+/** A file to put in the zip. */
+export interface ZipEntry {
+  name: string;
+  data: string | Uint8Array | ArrayBuffer;
+}
+
+/** Zip file bytes for the given files. */
+function create(files: ZipEntry[], when: Date = new Date()): Uint8Array<ArrayBuffer> {
   const enc = new TextEncoder();
   const { time, date } = dosDateTime(when);
-  const locals = [];
-  const centrals = [];
+  const locals: Uint8Array[] = [];
+  const centrals: Uint8Array[] = [];
   let offset = 0;
 
   for (const f of files) {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import Zip from '../lib/zip.js';
+import Zip from '../lib/zip.ts';
 
 test('crc32 matches the reference value', () => {
   assert.equal(Zip.crc32(new TextEncoder().encode('123456789')), 0xcbf43926);

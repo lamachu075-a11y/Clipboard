@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { columnsOf } from '../lib/store.js';
-import { fmtTime } from '../lib/projectio.js';
+import type { Row } from '../lib/types.ts';
+import { columnsOf } from '../lib/store.ts';
+import { fmtTime } from '../lib/projectio.ts';
 
-function CellValue({ value }) {
+function CellValue({ value }: { value: string }) {
   if (/^(https?:\/\/|www\.)\S+$/i.test(value)) {
     const href = /^www\./i.test(value) ? 'https://' + value : value;
     return (
@@ -17,19 +18,40 @@ function CellValue({ value }) {
   return value;
 }
 
+export interface SortState {
+  /** Column name, or '__time' for the capture time. */
+  col: string;
+  dir: 'asc' | 'desc';
+}
+
+interface DataTableProps {
+  /** All rows (decide the columns). */
+  rows: Row[];
+  /** Visible rows, sorted. */
+  list: Row[];
+  keepSource: boolean;
+  sort: SortState;
+  onSort: (col: string) => void;
+  onEdit: (id: string, col: string, value: string) => void;
+  onDelete: (id: string) => void;
+  onExplain: (source: string) => void;
+  /** Change it to highlight every row (e.g. after opening a project). */
+  highlightToken: number;
+}
+
 /**
  * The rows table. On phones the same markup is styled as cards (see app.css).
  * @param {{ rows, list, keepSource, sort, onSort, onEdit, onDelete, onExplain, highlightToken }} props
  *   rows: all rows (decides the columns); list: the visible, sorted rows;
  *   highlightToken: change it to highlight every row (e.g. after opening a project)
  */
-export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit, onDelete, onExplain, highlightToken }) {
+export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit, onDelete, onExplain, highlightToken }: DataTableProps) {
   const cols = columnsOf(rows);
-  const [editing, setEditing] = useState(null); // { id, col }
+  const [editing, setEditing] = useState<{ id: string; col: string } | null>(null);
   // Rows not seen in the previous render get a short highlight.
-  const known = useRef(null);
+  const known = useRef<Set<string> | null>(null);
   const token = useRef(highlightToken);
-  const [fresh, setFresh] = useState(() => new Set());
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     const ids = rows.map((r) => r.id);
     if (known.current === null) known.current = new Set(ids);
@@ -37,16 +59,18 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
       token.current = highlightToken;
       known.current = new Set();
     }
-    const added = ids.filter((id) => !known.current.has(id));
+    const seen = known.current;
+    const added = ids.filter((id) => !seen.has(id));
     known.current = new Set(ids);
     if (added.length) {
       setFresh(new Set(added));
       const t = setTimeout(() => setFresh(new Set()), 2000);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [rows, highlightToken]);
 
-  const th = (label, key, extra = '') => {
+  const th = (label: string, key?: string | null, extra = '') => {
     if (!key) return <th className={('nosort ' + extra).trim()}>{label}</th>;
     return (
       <th data-sort={sort.col === key ? sort.dir : undefined} onClick={() => onSort(key)}>
@@ -55,7 +79,7 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
     );
   };
 
-  let lastClip = null;
+  let lastClip: string | null = null;
   let alt = false;
   return (
     <table id="table">

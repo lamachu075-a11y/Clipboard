@@ -4,9 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import Pdf from '../lib/pdf.js';
+import type { TestContext } from 'node:test';
+import Pdf from '../lib/pdf.ts';
 
-function pdfText(bytes, t) {
+/** Text of a PDF read by pypdf (strict), or undefined when pypdf is not installed. */
+function pdfText(bytes: Uint8Array, t: TestContext): string | undefined {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-test-'));
   const file = path.join(dir, 'out.pdf');
   fs.writeFileSync(file, bytes);
@@ -20,7 +22,10 @@ print(r.metadata.title)
 for p in r.pages: print(p.extract_text())
 `, file]).toString();
   } catch (e) {
-    if (/No module named/.test(String(e.stderr))) return t.skip('pypdf not available');
+    if (/No module named/.test(String((e as { stderr?: unknown }).stderr))) {
+      t.skip('pypdf not available');
+      return undefined;
+    }
     throw e;
   }
 }
@@ -46,7 +51,7 @@ test('long tables flow over several pages with repeated headers', (t) => {
   if (!out) return;
   const pages = Number(out.split('\n')[0]);
   assert.ok(pages > 3, `pages: ${pages}`);
-  assert.equal(out.match(/Email/g).length, pages);
+  assert.equal(out.match(/Email/g)?.length, pages);
   assert.ok(out.includes('Person 199'));
 });
 

@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import E from '../lib/extractor.js';
-import T from '../lib/templates.js';
+import E from '../lib/extractor.ts';
+import T from '../lib/templates.ts';
+import type { ResolvedRule, Template } from '../lib/templates.ts';
+import type { SettingsInput } from '../lib/types.ts';
 
 // Only the template's rule, so built-in rules don't interfere.
-const onlyRule = (rule) => ({
+const onlyRule = (rule: ResolvedRule): SettingsInput => ({
   splitMode: 'whole',
   matchMode: 'zip',
   fields: Object.fromEntries(Object.keys(E.DEFAULT_SETTINGS.fields).map((k) => [k, { enabled: false }])),
-  customFields: [Object.assign({ id: 't', enabled: true }, rule)],
+  customFields: [{ id: 't', enabled: true, ...rule }],
 });
 
 for (const t of T.TEMPLATES) {
@@ -22,19 +24,20 @@ for (const t of T.TEMPLATES) {
 }
 
 test('fill-in examples follow the typed values', () => {
-  for (const t of T.TEMPLATES.filter((x) => x.params)) {
+  for (const t of T.TEMPLATES.filter((x): x is Template & { params: NonNullable<Template['params']> } => !!x.params)) {
     assert.equal(T.exampleOf(t), t.example, t.id);
     const values = Object.fromEntries(t.params.map((p) => [p.key, p.key === 'end' ? '>>' : 'My Field']));
     const rule = T.resolve(t, values);
     const got = E.extract(T.exampleOf(t, values), onlyRule(rule)).map((r) => r[rule.name]);
     // Same values as the default example, with the default label swapped for the typed one.
-    const swap = (v) => t.params.reduce((acc, p) => acc.split(p.default).join(values[p.key]), v);
+    const swap = (v: string): string => t.params.reduce((acc, p) => acc.split(p.default).join(values[p.key]), v);
     assert.deepEqual(got, t.expect.map(swap), t.id);
   }
 });
 
 test('fill-in templates escape the typed label', () => {
   const t = T.TEMPLATES.find((x) => x.id === 'after-label');
+  assert.ok(t);
   const rule = T.resolve(t, { label: 'Total ($)' });
   assert.equal(rule.name, 'Total ($)');
   assert.deepEqual(E.extract('Total ($): 45.00', onlyRule(rule)), [{ 'Total ($)': '45.00' }]);

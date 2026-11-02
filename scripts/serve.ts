@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'out');
 const port = Number(process.env.PORT) || 8080;
-const TYPES = {
+const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -27,9 +27,12 @@ if (!fs.existsSync(root)) {
 
 http
   .createServer((req, res) => {
-    let rel = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    const rel = decodeURIComponent(new URL(req.url || '/', 'http://x').pathname);
     let file = path.join(root, rel);
-    if (!file.startsWith(root)) return res.writeHead(403).end();
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
     if (!fs.existsSync(file)) file = path.join(root, '404.html');
     const status = file.endsWith('404.html') && !rel.endsWith('404.html') ? 404 : 200;

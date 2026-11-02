@@ -21,18 +21,47 @@
  *      ("zip" mode) or joined into one cell ("join" mode).
  *   5. Rows missing a required column are dropped; duplicate rows are removed.
  */
+import type {
+  BuiltinKey,
+  DroppedRow,
+  ExplainResult,
+  FieldConfig,
+  FieldKey,
+  Match,
+  RowData,
+  RuleError,
+  Rules,
+  Settings,
+  SettingsInput,
+  SplitMode,
+} from './types.ts';
 
 const MONTHS =
   'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|' +
   'sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
 
-const trimTrailing = (chars) => (v) => v.replace(new RegExp('[' + chars + ']+$'), '');
+const trimTrailing = (chars: string) => (v: string): string => v.replace(new RegExp('[' + chars + ']+$'), '');
+
+/** A built-in extraction rule. */
+export interface BuiltinField {
+  key: BuiltinKey;
+  label: string;
+  hue: number;
+  defaultEnabled: boolean;
+  description: string;
+  pattern: string;
+  flags: string;
+  /** Tidies a matched value (e.g. trailing punctuation). */
+  clean?: (v: string) => string;
+  /** true, or why the value is not accepted. */
+  validate?: (v: string) => true | string;
+}
 
 /**
  * Built-in rules, in evaluation order. The admin panel shows `pattern` and
  * lets the user override it per installation.
  */
-const BUILTIN_FIELDS = [
+const BUILTIN_FIELDS: BuiltinField[] = [
   {
     key: 'email',
     label: 'Email',
@@ -98,7 +127,7 @@ const BUILTIN_FIELDS = [
       '(?<![\\w+])(?:\\+\\d{1,3}[ \\t.-]?)?(?:\\(\\d{1,4}\\)[ \\t.-]?)?\\d{2,5}(?:[ \\t.-]\\d{2,5}){1,4}(?!\\w)' +
       '|(?<![\\w+])\\+?\\d{10,13}(?!\\w)',
     flags: 'g',
-    validate: (v) => {
+    validate: (v: string): true | string => {
       if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(v)) return 'looks like an IP address';
       const digits = v.replace(/\D/g, '').length;
       return digits >= 7 && digits <= 15 ? true : `has ${digits} digits (needs 7–15)`;
@@ -116,12 +145,23 @@ const BUILTIN_FIELDS = [
 ];
 
 /** Column order for built-in fields (independent of evaluation order). */
-const DISPLAY_ORDER = ['email', 'phone', 'url', 'date', 'amount', 'ip', 'hashtag'];
+const DISPLAY_ORDER: BuiltinKey[] = ['email', 'phone', 'url', 'date', 'amount', 'ip', 'hashtag'];
 
 const KV_LINE = /^\s*([A-Za-z][A-Za-z0-9 _./()#&-]{0,39}?)\s*[:=]\s*(\S.*?)\s*$/;
 const KV_SKIP_KEYS = /^(https?|ftp|mailto|tel|file|data|javascript)$/i;
 
-const KV_FIELD = {
+/** "Key: Value" lines, shown alongside the built-in rules. */
+export interface KvFieldInfo {
+  key: 'kv';
+  label: string;
+  hue: number;
+  defaultEnabled: boolean;
+  description: string;
+  pattern: string;
+  flags: string;
+}
+
+const KV_FIELD: KvFieldInfo = {
   key: 'kv',
   label: 'Key: Value lines',
   hue: 50,
@@ -133,70 +173,92 @@ const KV_FIELD = {
   flags: '',
 };
 
-const CUSTOM_HUES = [95, 290, 15, 170, 230, 340, 60, 250];
+const CUSTOM_HUES: readonly number[] = [95, 290, 15, 170, 230, 340, 60, 250];
 
-const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   pollInterval: 1000,
-  splitMode: 'auto', // auto | whole | line | blank | custom
+  splitMode: 'auto',
   delimiter: '---',
   matchMode: 'zip', // zip: one row per match | join: one cell per field
-  repeatSingles: true, // in zip mode, copy single-value fields into every row
-  detectTables: true, // spreadsheet / TSV copies become rows directly
-  dedupeRows: true, // skip rows identical to one already in the table
-  keepSource: true, // keep the original clipboard text with each row
-  minLength: 3, // ignore clipboard text shorter than this
-  fields: {}, // { [builtinKey]: { enabled, required, label?, pattern?, flags? } }
-  customFields: [], // [{ id, name, pattern, flags, group, enabled, required }]
+  repeatSingles: true,
+  detectTables: true,
+  dedupeRows: true,
+  keepSource: true,
+  minLength: 3,
+  fields: Object.fromEntries(
+    [...BUILTIN_FIELDS, KV_FIELD].map((f) => [f.key, { enabled: f.defaultEnabled, required: false }])
+  ) as Record<FieldKey, FieldConfig>,
+  customFields: [],
 };
 
-for (const f of BUILTIN_FIELDS.concat(KV_FIELD)) {
-  DEFAULT_SETTINGS.fields[f.key] = { enabled: f.defaultEnabled, required: false };
-}
+const FIELD_KEYS = Object.keys(DEFAULT_SETTINGS.fields) as FieldKey[];
 
-function normalizeSettings(s) {
-  s = s && typeof s === 'object' ? s : {};
-  const out = Object.assign({}, DEFAULT_SETTINGS, s);
-  out.fields = {};
-  for (const key of Object.keys(DEFAULT_SETTINGS.fields)) {
-    out.fields[key] = Object.assign({}, DEFAULT_SETTINGS.fields[key], (s.fields || {})[key]);
+/** Fill in defaults for anything missing (settings from storage or a file). */
+function normalizeSettings(input?: SettingsInput | null): Settings {
+  const s: SettingsInput = input && typeof input === 'object' ? input : {};
+  const out: Settings = { ...DEFAULT_SETTINGS, ...s } as Settings;
+  out.fields = {} as Record<FieldKey, FieldConfig>;
+  for (const key of FIELD_KEYS) {
+    out.fields[key] = { ...DEFAULT_SETTINGS.fields[key], ...(s.fields || {})[key] };
   }
-  out.customFields = Array.isArray(s.customFields) ? s.customFields.map((c) => Object.assign({}, c)) : [];
+  out.customFields = Array.isArray(s.customFields) ? s.customFields.map((c) => ({ ...c })) : [];
   out.pollInterval = Math.max(250, Number(out.pollInterval) || DEFAULT_SETTINGS.pollInterval);
   out.minLength = Math.max(0, Number(out.minLength) || 0);
   return out;
 }
 
 /** Compile a user regex; returns { regex } or { error }. Always global. */
-function compileCustom(cf) {
+function compileCustom(cf: { pattern: string; flags?: string | null }): { regex?: RegExp; error?: string } {
   try {
     let flags = String(cf.flags || '').replace(/[^dgimsuvy]/g, '');
     if (!flags.includes('g')) flags += 'g';
     flags = Array.from(new Set(flags)).join('');
     return { regex: new RegExp(cf.pattern, flags) };
   } catch (e) {
-    return { error: e.message };
+    return { error: (e as Error).message };
   }
 }
 
-const builtinRegex = (f) => new RegExp(f.pattern, f.flags);
+const builtinRegex = (f: BuiltinField): RegExp => new RegExp(f.pattern, f.flags);
 
-/**
- * Turn settings into the ordered list of active rules.
- * @returns {{ rules: Array, errors: Array<{id, label, message}> }}
- */
-function compileRules(settings) {
+interface KvRule {
+  id: 'kv';
+  type: 'kv';
+  label: string;
+  hue: number;
+  required: false;
+}
+interface RegexRule {
+  id: string;
+  type: 'custom' | 'builtin';
+  label: string;
+  hue: number;
+  regex: RegExp;
+  group?: number;
+  required: boolean;
+  clean?: (v: string) => string;
+  validate?: (v: string) => true | string;
+}
+/** An active rule, ready to run. */
+export type Rule = KvRule | RegexRule;
+
+/** Turn settings into the ordered list of active rules. */
+function compileRules(settings: Settings): { rules: Rule[]; errors: RuleError[] } {
   const s = settings;
-  const rules = [];
-  const errors = [];
-  if (s.fields.kv.enabled) rules.push({ id: 'kv', type: 'kv', label: KV_FIELD.label, hue: KV_FIELD.hue });
+  const rules: Rule[] = [];
+  const errors: RuleError[] = [];
+  if (s.fields.kv.enabled) rules.push({ id: 'kv', type: 'kv', label: KV_FIELD.label, hue: KV_FIELD.hue, required: false });
 
   s.customFields.forEach((cf, i) => {
     if (cf.enabled === false) return;
     const name = String(cf.name || '').trim();
     if (!name || !cf.pattern) return;
     const { regex, error } = compileCustom(cf);
-    if (error) return errors.push({ id: 'custom:' + cf.id, label: name, message: error });
+    if (!regex) {
+      errors.push({ id: 'custom:' + cf.id, label: name, message: error || 'invalid pattern' });
+      return;
+    }
     rules.push({
       id: 'custom:' + cf.id,
       type: 'custom',
@@ -214,8 +276,8 @@ function compileRules(settings) {
     let regex = builtinRegex(f);
     if (cfg.pattern || cfg.flags != null) {
       const r = compileCustom({ pattern: cfg.pattern || f.pattern, flags: cfg.flags != null ? cfg.flags : f.flags });
-      if (r.error) errors.push({ id: f.key, label: f.label, message: r.error + ' (using the default pattern)' });
-      else regex = r.regex;
+      if (r.regex) regex = r.regex;
+      else errors.push({ id: f.key, label: f.label, message: r.error + ' (using the default pattern)' });
     }
     rules.push({
       id: f.key,
@@ -231,15 +293,22 @@ function compileRules(settings) {
   return { rules, errors };
 }
 
-const titleCase = (s) =>
+const titleCase = (s: string): string =>
   s
     .replace(/[_\s]+/g, ' ')
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+interface KvPair {
+  key: string;
+  value: string;
+  start: number;
+  end: number;
+}
+
 /** "Key: Value" lines with the position of each value. */
-function parseKeyValues(text) {
-  const pairs = [];
+function parseKeyValues(text: string): KvPair[] {
+  const pairs: KvPair[] = [];
   let pos = 0;
   for (const line of text.split('\n')) {
     const m = KV_LINE.exec(line);
@@ -260,11 +329,21 @@ function parseKeyValues(text) {
   return pairs;
 }
 
-function scanRegex(regex, text, group) {
-  const results = [];
+interface ScanResult {
+  value: string;
+  /** Start and length of the whole match. */
+  index: number;
+  length: number;
+  /** Start and end of the kept value (the capture group, if any). */
+  start: number;
+  end: number;
+}
+
+function scanRegex(regex: RegExp, text: string, group?: number): ScanResult[] {
+  const results: ScanResult[] = [];
   const g = Number(group) || 0;
   regex.lastIndex = 0;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = regex.exec(text)) !== null) {
     if (m[0] === '') {
       regex.lastIndex++;
@@ -279,34 +358,38 @@ function scanRegex(regex, text, group) {
 
 /**
  * Run every rule on one record.
- * @returns {{ cols: Map<string, string[]>, matches: Array }}
- *   matches: { ruleId, label, value, start, end, status: used|duplicate|skipped|rejected, note }
- *   (start/end are positions in the full clipboard text)
+ * Returns the values found per column, and every match with what happened to it
+ * (start/end are positions in the full clipboard text).
  */
-function extractRecord(text, offset, rules) {
-  const cols = new Map();
-  const matches = [];
-  const add = (m) => {
+function extractRecord(text: string, offset: number, rules: Rule[]): { cols: Map<string, string[]>; matches: Match[] } {
+  const cols = new Map<string, string[]>();
+  const matches: Match[] = [];
+  const add = (m: Match): void => {
     m.value = String(m.value).trim();
     matches.push(m);
     if (m.status) return;
-    if (!m.value) return Object.assign(m, { status: 'skipped', note: 'empty value' });
-    if (!cols.has(m.label)) cols.set(m.label, []);
-    const arr = cols.get(m.label);
-    if (arr.includes(m.value)) return Object.assign(m, { status: 'duplicate', note: 'same value already found in this record' });
+    if (!m.value) {
+      Object.assign(m, { status: 'skipped', note: 'empty value' });
+      return;
+    }
+    let arr = cols.get(m.label);
+    if (!arr) cols.set(m.label, (arr = []));
+    if (arr.includes(m.value)) {
+      Object.assign(m, { status: 'duplicate', note: 'same value already found in this record' });
+      return;
+    }
     arr.push(m.value);
     m.status = 'used';
   };
   // "Email: x" is left to the Email rule; "Bill to: x" to a custom "Bill to" rule.
-  const builtinLabels = new Map(rules.filter((r) => r.type !== 'kv').map((r) => [r.label.toLowerCase(), r.label]));
+  const ruleLabels = new Map(rules.filter((r) => r.type !== 'kv').map((r) => [r.label.toLowerCase(), r.label]));
 
   for (const rule of rules) {
     if (rule.type === 'kv') {
       for (const p of parseKeyValues(text)) {
-        const m = { ruleId: 'kv', hue: rule.hue, label: p.key, value: p.value, start: offset + p.start, end: offset + p.end };
-        if (builtinLabels.has(p.key.toLowerCase())) {
-          Object.assign(m, { status: 'skipped', note: `left to the ${builtinLabels.get(p.key.toLowerCase())} rule` });
-        }
+        const m: Match = { ruleId: 'kv', hue: rule.hue, label: p.key, value: p.value, start: offset + p.start, end: offset + p.end };
+        const owner = ruleLabels.get(p.key.toLowerCase());
+        if (owner) Object.assign(m, { status: 'skipped', note: `left to the ${owner} rule` });
         add(m);
       }
     } else if (rule.type === 'custom') {
@@ -318,20 +401,20 @@ function extractRecord(text, offset, rules) {
 
   // Built-in rules claim (mask) the text they match.
   let masked = text;
-  const found = {};
+  const found: Record<string, Match[]> = {};
   for (const rule of rules) {
     if (rule.type !== 'builtin') continue;
-    found[rule.id] = [];
+    const list: Match[] = (found[rule.id] = []);
     for (const r of scanRegex(rule.regex, masked, 0)) {
       const value = rule.clean ? rule.clean(r.value) : r.value;
-      const m = { ruleId: rule.id, hue: rule.hue, label: rule.label, value, start: offset + r.start, end: offset + r.start + value.length };
+      const m: Match = { ruleId: rule.id, hue: rule.hue, label: rule.label, value, start: offset + r.start, end: offset + r.start + value.length };
       const verdict = rule.validate ? rule.validate(value) : true;
       if (verdict !== true) {
         Object.assign(m, { status: 'rejected', note: verdict || 'failed validation' });
       } else {
         masked = masked.slice(0, r.index) + ' '.repeat(r.length) + masked.slice(r.index + r.length);
       }
-      found[rule.id].push(m);
+      list.push(m);
     }
   }
   for (const key of DISPLAY_ORDER) for (const m of found[key] || []) add(m);
@@ -340,17 +423,17 @@ function extractRecord(text, offset, rules) {
 }
 
 /** Turn one record's columns into rows. */
-function buildRows(cols, settings, rules) {
+function buildRows(cols: Map<string, string[]>, settings: Settings, rules: Rule[]): { rows: RowData[]; dropped: DroppedRow[] } {
   if (cols.size === 0) return { rows: [], dropped: [] };
-  let rows = [];
+  let rows: RowData[] = [];
   if (settings.matchMode === 'join') {
-    const row = {};
+    const row: RowData = {};
     for (const [label, values] of cols) row[label] = values.join(', ');
     rows.push(row);
   } else {
     const count = Math.max(...Array.from(cols.values(), (v) => v.length));
     for (let i = 0; i < count; i++) {
-      const row = {};
+      const row: RowData = {};
       for (const [label, values] of cols) {
         if (values[i] !== undefined) row[label] = values[i];
         else if (settings.repeatSingles && values.length === 1) row[label] = values[0];
@@ -359,7 +442,7 @@ function buildRows(cols, settings, rules) {
     }
   }
   const required = rules.filter((r) => r.required).map((r) => r.label);
-  const dropped = [];
+  const dropped: DroppedRow[] = [];
   rows = rows.filter((r) => {
     const missing = required.filter((label) => !r[label]);
     if (missing.length) dropped.push({ row: r, missing });
@@ -371,7 +454,7 @@ function buildRows(cols, settings, rules) {
 const DEFAULT_REGEXES = BUILTIN_FIELDS.filter((f) => f.key !== 'hashtag').map(builtinRegex);
 
 /** Spreadsheet copies: every line has the same (>0) number of tabs. */
-function parseTable(text) {
+function parseTable(text: string): { rows: RowData[]; reason: string } | null {
   const lines = text.split('\n').filter((l) => l.trim() !== '');
   if (lines.length < 2) return null;
   const tabs = lines.map((l) => (l.match(/\t/g) || []).length);
@@ -388,7 +471,7 @@ function parseTable(text) {
   const body = looksLikeHeader ? cells.slice(1) : cells;
   const rows = body
     .map((row) => {
-      const obj = {};
+      const obj: RowData = {};
       headers.forEach((h, i) => {
         if (row[i]) obj[h] = row[i];
       });
@@ -403,17 +486,22 @@ function parseTable(text) {
   };
 }
 
+interface RecordPiece {
+  text: string;
+  offset: number;
+}
+
 /** Split text into trimmed, non-empty pieces, keeping their offsets. */
-function pieces(text, separator) {
-  const out = [];
-  const push = (s, e) => {
+function pieces(text: string, separator: RegExp): RecordPiece[] {
+  const out: RecordPiece[] = [];
+  const push = (s: number, e: number): void => {
     const raw = text.slice(s, e);
     const t = raw.trim();
     if (t) out.push({ text: t, offset: s + raw.length - raw.trimStart().length });
   };
   let last = 0;
   separator.lastIndex = 0;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = separator.exec(text)) !== null) {
     if (m[0] === '') {
       separator.lastIndex++;
@@ -428,11 +516,17 @@ function pieces(text, separator) {
 
 const BLANK_LINES = /\n[ \t]*\n(?:[ \t]*\n)*/g;
 const LINES = /\n/g;
-const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function splitRecords(text, settings, rules) {
-  const whole = [{ text, offset: 0 }];
-  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+interface Split {
+  mode: Exclude<SplitMode, 'auto'>;
+  records: RecordPiece[];
+  reason: string;
+}
+
+function splitRecords(text: string, settings: Settings, rules: Rule[]): Split {
+  const whole: RecordPiece[] = [{ text, offset: 0 }];
+  const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
   switch (settings.splitMode) {
     case 'whole':
       return { mode: 'whole', records: whole, reason: 'Setting: the whole text is one record.' };
@@ -473,10 +567,10 @@ function splitRecords(text, settings, rules) {
 }
 
 /** Full trace of how `text` is turned into rows. */
-function explain(text, settings) {
-  settings = normalizeSettings(settings);
-  text = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
-  const result = { text, kind: 'text', mode: null, reason: '', records: [], rows: [], errors: [], duplicateRows: 0, ignored: null };
+function explain(input: unknown, settingsInput?: SettingsInput | null): ExplainResult {
+  const settings = normalizeSettings(settingsInput);
+  const text = String(input == null ? '' : input).replace(/\r\n?/g, '\n');
+  const result: ExplainResult = { text, kind: 'text', mode: null, reason: '', records: [], rows: [], errors: [], duplicateRows: 0, ignored: null };
 
   if (text.trim().length < Math.max(1, settings.minLength)) {
     result.ignored = text.trim() ? `Text is shorter than the minimum of ${settings.minLength} characters.` : 'No text.';
@@ -486,7 +580,7 @@ function explain(text, settings) {
   result.errors = errors;
   result.rules = rules.map(({ id, type, label, hue, required }) => ({ id, type, label, hue, required }));
 
-  let rows = [];
+  let rows: RowData[] = [];
   const table = settings.detectTables ? parseTable(text) : null;
   if (table) {
     result.kind = 'table';
@@ -505,7 +599,7 @@ function explain(text, settings) {
   }
 
   // Drop identical rows produced by the same text.
-  const seen = new Set();
+  const seen = new Set<string>();
   result.rows = rows.filter((r) => {
     const k = rowKey(r);
     if (seen.has(k)) return false;
@@ -516,12 +610,13 @@ function explain(text, settings) {
   return result;
 }
 
-function extract(text, settings) {
+/** The rows extracted from `text`. */
+function extract(text: unknown, settings?: SettingsInput | null): RowData[] {
   return explain(text, settings).rows;
 }
 
 /** Stable identity for a row's data (used for de-duplication). */
-function rowKey(data) {
+function rowKey(data: RowData): string {
   return JSON.stringify(
     Object.keys(data)
       .sort()
@@ -530,14 +625,16 @@ function rowKey(data) {
 }
 
 /** Extraction-related part of the settings (what the admin panel edits). */
-const RULE_KEYS = ['splitMode', 'delimiter', 'matchMode', 'repeatSingles', 'detectTables', 'dedupeRows', 'keepSource', 'minLength', 'fields', 'customFields'];
-function rulesOf(settings) {
+const RULE_KEYS = ['splitMode', 'delimiter', 'matchMode', 'repeatSingles', 'detectTables', 'dedupeRows', 'keepSource', 'minLength', 'fields', 'customFields'] as const;
+
+function rulesOf(settings?: SettingsInput | null): Rules {
   const s = normalizeSettings(settings);
-  const out = {};
-  for (const k of RULE_KEYS) out[k] = s[k];
-  return out;
+  const out: Partial<Rules> = {};
+  for (const k of RULE_KEYS) (out as Record<string, unknown>)[k] = s[k];
+  return out as Rules;
 }
-const sameRules = (a, b) => JSON.stringify(rulesOf(a)) === JSON.stringify(rulesOf(b));
+
+const sameRules = (a?: SettingsInput | null, b?: SettingsInput | null): boolean => JSON.stringify(rulesOf(a)) === JSON.stringify(rulesOf(b));
 
 const api = {
   BUILTIN_FIELDS,
@@ -556,5 +653,20 @@ const api = {
   sameRules,
 };
 
-export { BUILTIN_FIELDS, DISPLAY_ORDER, KV_FIELD, CUSTOM_HUES, DEFAULT_SETTINGS, RULE_KEYS, normalizeSettings, compileCustom, compileRules, explain, extract, rowKey, rulesOf, sameRules };
+export {
+  BUILTIN_FIELDS,
+  DISPLAY_ORDER,
+  KV_FIELD,
+  CUSTOM_HUES,
+  DEFAULT_SETTINGS,
+  RULE_KEYS,
+  normalizeSettings,
+  compileCustom,
+  compileRules,
+  explain,
+  extract,
+  rowKey,
+  rulesOf,
+  sameRules,
+};
 export default api;

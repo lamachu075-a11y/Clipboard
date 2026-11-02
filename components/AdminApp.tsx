@@ -2,13 +2,16 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BUILTIN_FIELDS, CUSTOM_HUES, DEFAULT_SETTINGS, KV_FIELD, compileCustom, explain, normalizeSettings, rulesOf } from '../lib/extractor.js';
-import { CHEATSHEET, TEMPLATES, defaults as templateDefaults, exampleOf, resolve as resolveTemplate } from '../lib/templates.js';
-import Store, { uid } from '../lib/store.js';
-import { BASE_PATH, pickTextFile, saveTextFile } from '../lib/files.js';
-import { Modal, ToastProvider, useToast } from './common.jsx';
+import type { CSSProperties, InputHTMLAttributes, ReactNode } from 'react';
+import type { CustomField, ExplainResult, FieldConfig, Match, MatchStatus, RowData, Settings, SettingsInput } from '../lib/types.ts';
+import type { ResolvedRule, Template, TemplateValues } from '../lib/templates.ts';
+import { BUILTIN_FIELDS, CUSTOM_HUES, DEFAULT_SETTINGS, KV_FIELD, compileCustom, explain, normalizeSettings, rulesOf } from '../lib/extractor.ts';
+import { CHEATSHEET, TEMPLATES, defaults as templateDefaults, exampleOf, resolve as resolveTemplate } from '../lib/templates.ts';
+import Store, { uid } from '../lib/store.ts';
+import { BASE_PATH, pickTextFile, saveTextFile } from '../lib/files.ts';
+import { Modal, ToastProvider, useToast } from './common.tsx';
 
-const SAMPLES = {
+const SAMPLES: Record<string, string> = {
   Contacts:
     'Name: John Smith\nCompany: Acme Corp\nEmail: john@acme.com\nPhone: +91 98765 43210\n\n' +
     'Name: Jane Doe\nCompany: Globex\nEmail: jane@globex.io\nPhone: 020 7946 0958',
@@ -19,16 +22,19 @@ const SAMPLES = {
   Spreadsheet: 'Name\tEmail\tCity\nAli\tali@example.com\tDubai\nMei\tmei@example.cn\tShanghai',
 };
 
-const STATUS_TEXT = { used: '', duplicate: 'duplicate', skipped: 'skipped', rejected: 'rejected' };
-const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-const regexError = (pattern, flags) => (pattern ? compileCustom({ pattern, flags }).error || '' : '');
-const customHint = (cf) => (!String(cf.name || '').trim() || !cf.pattern ? 'Give the rule a column name and a pattern to turn it on.' : '');
+const STATUS_TEXT: Record<MatchStatus, string> = { used: '', duplicate: 'duplicate', skipped: 'skipped', rejected: 'rejected' };
+type Tab = 'rules' | 'test' | 'settings';
+/** CSS custom property for a rule's colour. */
+const hueStyle = (hue: number): CSSProperties => ({ '--h': hue }) as CSSProperties;
+const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+const regexError = (pattern: string, flags?: string): string => (pattern ? compileCustom({ pattern, flags }).error || '' : '');
+const customHint = (cf: CustomField): string => (!String(cf.name || '').trim() || !cf.pattern ? 'Give the rule a column name and a pattern to turn it on.' : '');
 
 /** Settings that run only one rule (to preview a template on its example). */
-const onlyRule = (rule) => ({
+const onlyRule = (rule: ResolvedRule): SettingsInput => ({
   splitMode: 'whole',
   fields: Object.fromEntries(Object.keys(DEFAULT_SETTINGS.fields).map((k) => [k, { enabled: false }])),
-  customFields: [Object.assign({ id: 'preview', enabled: true }, rule)],
+  customFields: [{ id: 'preview', enabled: true, ...rule }],
 });
 
 export default function AdminApp() {
@@ -41,14 +47,14 @@ export default function AdminApp() {
 
 function AdminPage() {
   const toast = useToast();
-  const [settings, setSettings] = useState(() => Store.getSettings());
+  const [settings, setSettings] = useState<Settings>(() => Store.getSettings());
   const [savedMsg, setSavedMsg] = useState('');
   const [testText, setTestText] = useState(() => Store.getDraft() ?? SAMPLES.Contacts);
-  const [tab, setTab] = useState('rules');
+  const [tab, setTab] = useState<Tab>('rules');
   const [templatesOpen, setTemplatesOpen] = useState(false);
-  const [flashId, setFlashId] = useState(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
   const savingSelf = useRef(false);
-  const saveTimer = useRef(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const latest = useRef(settings);
   latest.current = settings;
 
@@ -62,7 +68,7 @@ function AdminPage() {
 
   /** Apply a change to the settings and save it (debounced). */
   const update = useCallback(
-    (fn) => {
+    (fn: (s: Settings) => unknown) => {
       setSettings((prev) => {
         const next = normalizeSettings(structuredClone(prev));
         fn(next);
@@ -77,7 +83,7 @@ function AdminPage() {
           setSavedMsg('✓ Saved');
         } catch (e) {
           setSavedMsg('');
-          toast(e.message || String(e));
+          toast(e instanceof Error ? e.message : String(e));
         } finally {
           savingSelf.current = false;
         }
@@ -111,15 +117,15 @@ function AdminPage() {
 
   const result = useMemo(() => explain(testText, settings), [testText, settings]);
   const counts = useMemo(() => {
-    const c = {};
+    const c: Record<string, number> = {};
     for (const rec of result.records) for (const m of rec.matches) if (m.status === 'used') c[m.ruleId] = (c[m.ruleId] || 0) + 1;
     return c;
   }, [result]);
-  const countFor = (id, enabled) => (!enabled ? 'off' : result.kind === 'table' ? 'spreadsheet' : `${counts[id] || 0} found`);
+  const countFor = (id: string, enabled: boolean): string => (!enabled ? 'off' : result.kind === 'table' ? 'spreadsheet' : `${counts[id] || 0} found`);
 
   // ---------- rules ----------
 
-  const addRule = (rule = {}) => {
+  const addRule = (rule: Partial<CustomField> = {}): string => {
     const id = uid();
     update((s) => s.customFields.push({ id, name: '', pattern: '', flags: 'i', group: 0, enabled: true, required: false, ...rule }));
     setTab('rules');
@@ -127,7 +133,7 @@ function AdminPage() {
     setTimeout(() => {
       const card = document.querySelector(`[data-rule="custom:${id}"]`);
       card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      if (!rule.name) card?.querySelector('input.rule-name')?.focus();
+      if (!rule.name) card?.querySelector<HTMLInputElement>('input.rule-name')?.focus();
     }, 50);
     return id;
   };
@@ -138,14 +144,14 @@ function AdminPage() {
       const res = await saveTextFile({ suggestedName: 'clipboard-extractor-rules.json', text: JSON.stringify(file, null, 2) });
       if (res) toast(`Rules saved to ${res.fileName}`);
     } catch (e) {
-      toast('Could not save: ' + (e?.message || e));
+      toast('Could not save: ' + (e instanceof Error ? e.message : String(e)));
     }
   };
 
   const importRules = async () => {
     const picked = await pickTextFile();
     if (!picked) return;
-    let obj;
+    let obj: { app?: string; rules?: SettingsInput; settings?: SettingsInput } | null;
     try {
       obj = JSON.parse(picked.text);
     } catch {
@@ -195,11 +201,11 @@ function AdminPage() {
       </header>
 
       <nav className="admin-tabs" role="tablist" aria-label="Admin sections">
-        {[
+        {([
           ['rules', 'Rules'],
           ['test', 'Test & explain'],
           ['settings', 'Settings'],
-        ].map(([key, label]) => (
+        ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
             role="tab"
@@ -303,8 +309,12 @@ function AdminPage() {
                 ) : null}
                 {settings.customFields.map((cf, i) => {
                   const n = settings.customFields.length;
-                  const at = (fn) => update((s) => fn(s.customFields.find((x) => x.id === cf.id), s));
-                  const move = (d) =>
+                  const at = (fn: (c: CustomField) => unknown) =>
+                    update((s) => {
+                      const c = s.customFields.find((x) => x.id === cf.id);
+                      if (c) fn(c);
+                    });
+                  const move = (d: number) =>
                     update((s) => {
                       const arr = s.customFields;
                       [arr[i], arr[i + d]] = [arr[i + d], arr[i]];
@@ -360,7 +370,7 @@ function AdminPage() {
                 {BUILTIN_FIELDS.map((f) => {
                   const cfg = settings.fields[f.key];
                   const overridden = cfg.pattern != null || cfg.flags != null || !!cfg.label;
-                  const at = (fn) => update((s) => fn(s.fields[f.key]));
+                  const at = (fn: (c: FieldConfig) => unknown) => update((s) => fn(s.fields[f.key]));
                   return (
                     <RuleCard
                       key={f.key}
@@ -429,7 +439,7 @@ function AdminPage() {
               <h2>Records &amp; rows</h2>
               <label className="field">
                 Split records by
-                <select id="splitMode" value={settings.splitMode} onChange={(e) => update((s) => (s.splitMode = e.target.value))}>
+                <select id="splitMode" value={settings.splitMode} onChange={(e) => update((s) => (s.splitMode = e.target.value as Settings['splitMode']))}>
                   <option value="auto">Auto-detect</option>
                   <option value="whole">Whole text is one record</option>
                   <option value="line">Each line</option>
@@ -445,7 +455,7 @@ function AdminPage() {
               ) : null}
               <label className="field">
                 Several values in one record
-                <select id="matchMode" value={settings.matchMode} onChange={(e) => update((s) => (s.matchMode = e.target.value))}>
+                <select id="matchMode" value={settings.matchMode} onChange={(e) => update((s) => (s.matchMode = e.target.value as Settings['matchMode']))}>
                   <option value="zip">One row per value</option>
                   <option value="join">Join into one cell</option>
                 </select>
@@ -519,7 +529,7 @@ function AdminPage() {
           setTab('rules');
         }}
         usedNames={settings.customFields.map((c) => String(c.name || '').trim().toLowerCase())}
-        onAdd={(rule, templateId) => {
+        onAdd={(rule: ResolvedRule, templateId: string) => {
           setTemplatesOpen(false);
           addRule({ ...rule, template: templateId });
           toast(`Added the "${rule.name}" rule. Paste a sample into Test & explain to check it.`);
@@ -531,7 +541,7 @@ function AdminPage() {
 
 // ---------- small form parts ----------
 
-function Check({ id, checked, onChange, children }) {
+function Check({ id, checked, onChange, children }: { id: string; checked: boolean; onChange: (v: boolean) => void; children: ReactNode }) {
   return (
     <label className="check">
       <input type="checkbox" id={id} checked={!!checked} onChange={(e) => onChange(e.target.checked)} /> {children}
@@ -540,7 +550,15 @@ function Check({ id, checked, onChange, children }) {
 }
 
 /** Number input that only saves valid values when you leave it. */
-function NumberField({ id, label, unit, value, onChange, ...rest }) {
+type NumberFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  id: string;
+  label: string;
+  unit: string;
+  value: number;
+  onChange: (v: number) => void;
+};
+
+function NumberField({ id, label, unit, value, onChange, ...rest }: NumberFieldProps) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
   return (
@@ -565,7 +583,7 @@ function NumberField({ id, label, unit, value, onChange, ...rest }) {
   );
 }
 
-function RulesHead({ title, note }) {
+function RulesHead({ title, note }: { title: string; note?: string }) {
   return (
     <div className="rules-head">
       <h3>{title}</h3>
@@ -574,10 +592,37 @@ function RulesHead({ title, note }) {
   );
 }
 
-function RuleCard({ id, hue, enabled, onToggle, name, namePlaceholder, onName, tag, pattern, onPattern, flags, onFlags, group, onGroup, required, onRequired, description, count, zero, actions, flash }) {
+interface RuleCardProps {
+  id: string;
+  hue: number;
+  enabled: boolean;
+  onToggle: (on: boolean) => void;
+  name: string;
+  namePlaceholder?: string;
+  /** Without it the name is shown, not editable. */
+  onName?: (name: string) => void;
+  tag: string;
+  pattern: string;
+  /** Without it the pattern is read-only. */
+  onPattern?: (pattern: string) => void;
+  flags?: string;
+  onFlags?: (flags: string) => void;
+  group?: number;
+  onGroup?: (group: number) => void;
+  required?: boolean;
+  onRequired?: (required: boolean) => void;
+  description?: string;
+  /** "3 found", "off", … */
+  count: string;
+  zero: boolean;
+  actions?: ReactNode;
+  flash?: boolean;
+}
+
+function RuleCard({ id, hue, enabled, onToggle, name, namePlaceholder, onName, tag, pattern, onPattern, flags, onFlags, group, onGroup, required, onRequired, description, count, zero, actions, flash }: RuleCardProps) {
   const err = onPattern ? regexError(pattern, onFlags ? flags : '') : '';
   return (
-    <div className={'rule' + (enabled ? '' : ' off') + (flash ? ' flash' : '')} data-rule={id} style={{ '--h': hue }}>
+    <div className={'rule' + (enabled ? '' : ' off') + (flash ? ' flash' : '')} data-rule={id} style={hueStyle(hue)}>
       <div className="rule-top">
         <span className="swatch" />
         <label className="switch">
@@ -639,19 +684,20 @@ function RuleCard({ id, hue, enabled, onToggle, name, namePlaceholder, onName, t
 // ---------- test & explain ----------
 
 /** Record text with the matched parts highlighted (one highlight per character). */
-function Highlight({ text, offset, matches, hue }) {
-  const prio = { used: 0, duplicate: 1, skipped: 2, rejected: 3 };
-  const chosen = [];
-  for (const m of [...matches].sort((a, b) => prio[a.status] - prio[b.status] || a.start - b.start)) {
+function Highlight({ text, offset, matches, hue }: { text: string; offset: number; matches: Match[]; hue?: number }) {
+  const prio: Record<MatchStatus, number> = { used: 0, duplicate: 1, skipped: 2, rejected: 3 };
+  const rank = (m: Match): number => prio[m.status || 'used'];
+  const chosen: Match[] = [];
+  for (const m of [...matches].sort((a, b) => rank(a) - rank(b) || a.start - b.start)) {
     if (!chosen.some((x) => m.start < x.end && x.start < m.end)) chosen.push(m);
   }
   chosen.sort((a, b) => a.start - b.start);
-  const out = [];
+  const out: ReactNode[] = [];
   let pos = offset;
   chosen.forEach((m, i) => {
     if (m.start > pos) out.push(text.slice(pos - offset, m.start - offset));
     out.push(
-      <mark key={i} className={m.status} title={`${m.label}${m.note ? ' · ' + m.note : ''}`} style={{ '--h': hue ?? m.hue }}>
+      <mark key={i} className={m.status} title={`${m.label}${m.note ? ' · ' + m.note : ''}`} style={hueStyle(hue ?? m.hue)}>
         {text.slice(m.start - offset, m.end - offset)}
       </mark>
     );
@@ -661,8 +707,8 @@ function Highlight({ text, offset, matches, hue }) {
   return <pre className="hl">{out}</pre>;
 }
 
-function RowsTable({ rows }) {
-  const cols = [];
+function RowsTable({ rows }: { rows: RowData[] }) {
+  const cols: string[] = [];
   for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
   return (
     <div className="preview">
@@ -688,7 +734,7 @@ function RowsTable({ rows }) {
   );
 }
 
-function Step({ n, title, children }) {
+function Step({ n, title, children }: { n: number; title: string; children?: ReactNode }) {
   return (
     <div className="step">
       <div className="step-n">{n}</div>
@@ -700,7 +746,7 @@ function Step({ n, title, children }) {
   );
 }
 
-function Explanation({ result: r }) {
+function Explanation({ result: r }: { result: ExplainResult }) {
   const errors = r.errors.map((e) => (
     <p key={e.id} className="err">
       Rule &quot;{e.label}&quot;: {e.message}
@@ -746,10 +792,10 @@ function Explanation({ result: r }) {
             {rec.matches.length ? (
               <ul className="chips">
                 {rec.matches.map((m, j) => (
-                  <li key={j} className={'chip ' + m.status} title={m.note || ''} style={{ '--h': m.hue }}>
+                  <li key={j} className={'chip ' + m.status} title={m.note || ''} style={hueStyle(m.hue)}>
                     <span className="swatch" />
                     <b>{m.label}</b> <span className="val">{m.value}</span>
-                    {m.status !== 'used' ? <em>{` ${STATUS_TEXT[m.status]}${m.note ? ': ' + m.note : ''}`}</em> : null}
+                    {m.status !== 'used' ? <em>{` ${STATUS_TEXT[m.status || 'used']}${m.note ? ': ' + m.note : ''}`}</em> : null}
                   </li>
                 ))}
               </ul>
@@ -773,7 +819,15 @@ function Explanation({ result: r }) {
 
 // ---------- regex templates ----------
 
-function TemplatesDialog({ open, onClose, usedNames, onAdd }) {
+interface TemplatesDialogProps {
+  open: boolean;
+  onClose: () => void;
+  /** Column names of existing custom rules (lower case). */
+  usedNames: string[];
+  onAdd: (rule: ResolvedRule, templateId: string) => void;
+}
+
+function TemplatesDialog({ open, onClose, usedNames, onAdd }: TemplatesDialogProps) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   useEffect(() => {
@@ -787,7 +841,7 @@ function TemplatesDialog({ open, onClose, usedNames, onAdd }) {
   const cats = ['All', ...new Set(TEMPLATES.map((t) => t.category))];
 
   /** A column name not used by another custom rule ("Order", "Order 2", …). */
-  const freeName = (name) => {
+  const freeName = (name: string): string => {
     const used = new Set(usedNames);
     if (!used.has(name.toLowerCase())) return name;
     for (let i = 2; ; i++) if (!used.has(`${name} ${i}`.toLowerCase())) return `${name} ${i}`;
@@ -826,8 +880,8 @@ function TemplatesDialog({ open, onClose, usedNames, onAdd }) {
   );
 }
 
-function TemplateCard({ template: t, onAdd }) {
-  const [values, setValues] = useState(() => templateDefaults(t));
+function TemplateCard({ template: t, onAdd }: { template: Template; onAdd: (rule: ResolvedRule) => void }) {
+  const [values, setValues] = useState<TemplateValues>(() => templateDefaults(t));
   const rule = resolveTemplate(t, values);
   const r = explain(exampleOf(t, values), onlyRule(rule));
   const rec = r.records[0];

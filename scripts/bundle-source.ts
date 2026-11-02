@@ -4,13 +4,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { create } from '../lib/zip.js';
+import { create } from '../lib/zip.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = 'public/clipboard-extractor-source.zip';
-const INCLUDE = ['app', 'components', 'lib', 'scripts', 'test', 'public', '.github', 'package.json', 'package-lock.json', 'next.config.mjs', 'jsconfig.json', 'README.md', '.gitignore'];
+const INCLUDE = ['app', 'components', 'lib', 'scripts', 'test', 'public', '.github', 'package.json', 'package-lock.json', 'next.config.ts', 'tsconfig.json', 'next-env.d.ts', 'README.md', '.gitignore'];
 
-function walk(rel) {
+function walk(rel: string): string[] {
   const abs = path.join(root, rel);
   if (!fs.existsSync(abs)) return [];
   if (fs.statSync(abs).isFile()) return rel === OUT ? [] : [rel];

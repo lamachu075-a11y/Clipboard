@@ -9,11 +9,50 @@
  *                                  returns { pattern, column } for them
  */
 
-const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const esc = (s: string): string => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Allow flexible spaces inside a typed label ("Order  ID" matches "Order ID").
-const label = (s) => esc(String(s).trim()).replace(/\s+/g, '\\s+');
+const label = (s: string): string => esc(String(s).trim()).replace(/\s+/g, '\\s+');
 
-const TEMPLATES = [
+/** A fill-in value of a template (e.g. the label to look for). */
+export interface TemplateParam {
+  key: string;
+  label: string;
+  default: string;
+}
+
+export type TemplateValues = Record<string, string>;
+
+/** A ready-made regex for a custom rule. */
+export interface Template {
+  id: string;
+  category: string;
+  name: string;
+  /** Default column name. */
+  column?: string;
+  description: string;
+  pattern?: string;
+  flags: string;
+  /** Capture group to keep (0 = whole match). */
+  group: number;
+  example: string;
+  /** Values the template extracts from `example`. */
+  expect: string[];
+  params?: TemplateParam[];
+  /** Pattern and column for fill-in values. */
+  build?: (values: TemplateValues) => { pattern: string; column: string };
+  /** Example text for fill-in values. */
+  exampleFor?: (values: TemplateValues) => string;
+}
+
+/** The custom rule a template produces. */
+export interface ResolvedRule {
+  name: string;
+  pattern: string;
+  flags: string;
+  group: number;
+}
+
+const TEMPLATES: Template[] = [
   // ----- Fill in your own label -----
   {
     id: 'after-label',
@@ -21,10 +60,10 @@ const TEMPLATES = [
     name: 'Text after a label',
     description: 'Everything after "Label:" up to the end of the line. Works with ":", "-", "#" or "=" after the label.',
     params: [{ key: 'label', label: 'Label', default: 'Customer' }],
-    build: (p) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([^\\n]+)`, column: p.label.trim() }),
+    build: (p: TemplateValues) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([^\\n]+)`, column: p.label.trim() }),
     flags: 'i',
     group: 1,
-    exampleFor: (p) => `${p.label}: Acme Corp\nCity: Rome`,
+    exampleFor: (p: TemplateValues) => `${p.label}: Acme Corp\nCity: Rome`,
     example: 'Customer: Acme Corp\nCity: Rome',
     expect: ['Acme Corp'],
   },
@@ -34,10 +73,10 @@ const TEMPLATES = [
     name: 'Code or word after a label',
     description: 'The single word or code right after a label, e.g. an ID: letters, digits, "-", "_" and "/".',
     params: [{ key: 'label', label: 'Label', default: 'Ref' }],
-    build: (p) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([A-Za-z0-9][A-Za-z0-9_/-]*)`, column: p.label.trim() }),
+    build: (p: TemplateValues) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([A-Za-z0-9][A-Za-z0-9_/-]*)`, column: p.label.trim() }),
     flags: 'i',
     group: 1,
-    exampleFor: (p) => `Payment received, ${p.label}: TX-88213 on Monday`,
+    exampleFor: (p: TemplateValues) => `Payment received, ${p.label}: TX-88213 on Monday`,
     example: 'Payment received, Ref: TX-88213 on Monday',
     expect: ['TX-88213'],
   },
@@ -47,10 +86,10 @@ const TEMPLATES = [
     name: 'Number after a label',
     description: 'A number (with optional sign, thousands commas and decimals) right after a label.',
     params: [{ key: 'label', label: 'Label', default: 'Qty' }],
-    build: (p) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([-+]?\\d[\\d,]*(?:\\.\\d+)?)`, column: p.label.trim() }),
+    build: (p: TemplateValues) => ({ pattern: `${label(p.label)}\\s*[:#=-]?\\s*([-+]?\\d[\\d,]*(?:\\.\\d+)?)`, column: p.label.trim() }),
     flags: 'i',
     group: 1,
-    exampleFor: (p) => `Item: Desk lamp  ${p.label}: 1,200  Note: fragile`,
+    exampleFor: (p: TemplateValues) => `Item: Desk lamp  ${p.label}: 1,200  Note: fragile`,
     example: 'Item: Desk lamp  Qty: 1,200  Note: fragile',
     expect: ['1,200'],
   },
@@ -63,10 +102,10 @@ const TEMPLATES = [
       { key: 'start', label: 'Starts after', default: '[' },
       { key: 'end', label: 'Ends before', default: ']' },
     ],
-    build: (p) => ({ pattern: `${esc(p.start)}([\\s\\S]*?)${esc(p.end)}`, column: 'Between' }),
+    build: (p: TemplateValues) => ({ pattern: `${esc(p.start)}([\\s\\S]*?)${esc(p.end)}`, column: 'Between' }),
     flags: '',
     group: 1,
-    exampleFor: (p) => `Status ${p.start}Approved${p.end} by ${p.start}Finance team${p.end}`,
+    exampleFor: (p: TemplateValues) => `Status ${p.start}Approved${p.end} by ${p.start}Finance team${p.end}`,
     example: 'Status [Approved] by [Finance team]',
     expect: ['Approved', 'Finance team'],
   },
@@ -76,10 +115,10 @@ const TEMPLATES = [
     name: 'Whole line starting with…',
     description: 'Every line that begins with the given text.',
     params: [{ key: 'start', label: 'Line starts with', default: 'Note' }],
-    build: (p) => ({ pattern: `^[ \\t]*${label(p.start)}.*$`, column: p.start.trim() }),
+    build: (p: TemplateValues) => ({ pattern: `^[ \\t]*${label(p.start)}.*$`, column: p.start.trim() }),
     flags: 'im',
     group: 0,
-    exampleFor: (p) => `Order shipped\n${p.start}: leave at reception\nThanks`,
+    exampleFor: (p: TemplateValues) => `Order shipped\n${p.start}: leave at reception\nThanks`,
     example: 'Order shipped\nNote: leave at reception\nThanks',
     expect: ['Note: leave at reception'],
   },
@@ -350,20 +389,17 @@ const TEMPLATES = [
 ];
 
 /** Default fill-in values of a template. */
-const defaults = (t) => Object.fromEntries((t.params || []).map((p) => [p.key, p.default]));
+const defaults = (t: Template): TemplateValues => Object.fromEntries((t.params || []).map((p) => [p.key, p.default]));
 
-/**
- * The rule a template produces.
- * @returns {{ name, pattern, flags, group }}
- */
-function resolve(t, values) {
-  const v = Object.assign(defaults(t), values || {});
-  const built = t.build ? t.build(v) : { pattern: t.pattern, column: t.column };
+/** The rule a template produces (with the given fill-in values). */
+function resolve(t: Template, values?: TemplateValues): ResolvedRule {
+  const v = { ...defaults(t), ...(values || {}) };
+  const built = t.build ? t.build(v) : { pattern: t.pattern || '', column: t.column || '' };
   return { name: built.column || t.column || t.name, pattern: built.pattern, flags: t.flags || '', group: t.group || 0 };
 }
 
 /** Quick reference for the admin panel. */
-const CHEATSHEET = [
+const CHEATSHEET: [token: string, meaning: string][] = [
   ['\\d', 'a digit 0–9'],
   ['\\w', 'a letter, digit or _'],
   ['\\s', 'a space, tab or line break'],
@@ -384,8 +420,8 @@ const CHEATSHEET = [
 ];
 
 /** Example text for a template, using the user's fill-in values when it has them. */
-function exampleOf(t, values) {
-  const v = Object.assign(defaults(t), values || {});
+function exampleOf(t: Template, values?: TemplateValues): string {
+  const v = { ...defaults(t), ...(values || {}) };
   return t.exampleFor && (t.params || []).every((p) => String(v[p.key] || '').trim()) ? t.exampleFor(v) : t.example;
 }
 

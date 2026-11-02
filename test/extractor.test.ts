@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import E from '../lib/extractor.js';
+import E from '../lib/extractor.ts';
 
 test('one line with several fields becomes one row', () => {
   const rows = E.extract('Contact John at john@acme.com or +1 (555) 123-4567');
@@ -89,7 +89,7 @@ test('custom regex fields with capture groups', () => {
 
 test('invalid custom regex is ignored, not thrown', () => {
   assert.ok(E.compileCustom({ pattern: '(' }).error);
-  assert.deepEqual(E.extract('x@y.com', { customFields: [{ name: 'Bad', pattern: '(' }] }), [{ Email: 'x@y.com' }]);
+  assert.deepEqual(E.extract('x@y.com', { customFields: [{ id: 'bad', name: 'Bad', pattern: '(' }] }), [{ Email: 'x@y.com' }]);
 });
 
 test('custom delimiter splitting', () => {
@@ -125,7 +125,7 @@ test('explain() reports how records were split and why matches were skipped', ()
 test('explain() reports rejected matches and rows dropped by required fields', () => {
   const r = E.explain('IP 192.168 and a@b.com', { fields: { phone: { enabled: true, required: true } } });
   const phone = r.records[0].matches.find((m) => m.ruleId === 'phone');
-  assert.equal(phone.status, 'rejected');
+  assert.equal(phone?.status, 'rejected');
   assert.equal(r.rows.length, 0);
   assert.deepEqual(r.records[0].dropped[0].missing, ['Phone']);
 });

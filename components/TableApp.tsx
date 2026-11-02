@@ -2,16 +2,23 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { extract, normalizeSettings, rulesOf, sameRules } from '../lib/extractor.js';
-import Store, { Library, columnsOf, uid } from '../lib/store.js';
-import { BASE_PATH, download, pickTextFile, safeFileName, saveTextFile } from '../lib/files.js';
-import { csvOf, fileOf, jsonOf, parseProject, pdfOf, sortedRows, tsvOf } from '../lib/projectio.js';
-import { Modal, ToastProvider, useDismiss, useIsTouch, useStored, useToast } from './common.jsx';
-import DataTable from './DataTable.jsx';
+import type { ReactNode } from 'react';
+import type { Project, ProjectDoc, ProjectSummary, Row } from '../lib/types.ts';
+import { extract, normalizeSettings, rulesOf, sameRules } from '../lib/extractor.ts';
+import Store, { Library, columnsOf, uid } from '../lib/store.ts';
+import { BASE_PATH, download, pickTextFile, safeFileName, saveTextFile } from '../lib/files.ts';
+import { csvOf, fileOf, jsonOf, parseProject, pdfOf, sortedRows, tsvOf } from '../lib/projectio.ts';
+import { Modal, ToastProvider, useDismiss, useIsTouch, useStored, useToast } from './common.tsx';
+import DataTable from './DataTable.tsx';
+import type { SortState } from './DataTable.tsx';
 
-const permissionToMode = (state) => (state === 'granted' ? 'auto' : state === 'denied' ? 'denied' : 'prompt');
-const defaultProjectName = () => 'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+/** How the clipboard can be read in this browser. */
+type Mode = 'checking' | 'auto' | 'prompt' | 'denied' | 'paste';
+
+const permissionToMode = (state: PermissionState): Mode => (state === 'granted' ? 'auto' : state === 'denied' ? 'denied' : 'prompt');
+const defaultProjectName = (): string => 'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export default function TableApp() {
   return (
@@ -28,9 +35,9 @@ function TablePage() {
   const rows = useStored(() => Store.getRows(), ['rows']);
   const project = useStored(() => Store.getProject(), ['project']);
 
-  const [mode, setMode] = useState('checking'); // checking | auto | prompt | denied | paste
+  const [mode, setMode] = useState<Mode>('checking');
   const [focused, setFocused] = useState(true);
-  const [sort, setSort] = useState({ col: '__time', dir: 'desc' });
+  const [sort, setSort] = useState<SortState>({ col: '__time', dir: 'desc' });
   const [filter, setFilter] = useState('');
   const [highlightToken, setHighlightToken] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
@@ -39,22 +46,24 @@ function TablePage() {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [library, setLibrary] = useState(null);
+  const [library, setLibrary] = useState<ProjectSummary[] | null>(null);
   const [libraryError, setLibraryError] = useState('');
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const lastText = useRef(Store.getLastText());
   const busy = useRef(false);
-  const manualRef = useRef(null);
-  const menuRef = useRef(null);
+  const manualRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
+  /** Run a storage action; show its error (e.g. storage full) instead of failing. */
   const safely = useCallback(
-    (fn) => {
+    <T,>(fn: () => T): T | undefined => {
       try {
         return fn();
       } catch (e) {
-        toast(e.message || String(e));
+        toast(errMsg(e));
+        return undefined;
       }
     },
     [toast]
@@ -77,7 +86,7 @@ function TablePage() {
 
   /** A name that no saved project uses yet ("Project Nov 2, 2026 (2)", …). */
   const uniqueName = useCallback(
-    (base, { includeCurrent = true } = {}) => {
+    (base: string, { includeCurrent = true }: { includeCurrent?: boolean } = {}): string => {
       const names = new Set([...(includeCurrent ? [Store.getProject().name] : []), ...(library || []).map((p) => p.name)]);
       if (!names.has(base)) return base;
       for (let i = 2; ; i++) if (!names.has(`${base} (${i})`)) return `${base} (${i})`;
@@ -85,10 +94,10 @@ function TablePage() {
     [library]
   );
 
-  const updateProject = (changes) => safely(() => Store.setProject(Object.assign(Store.getProject(), changes)));
+  const updateProject = (changes: Partial<Project>) => safely(() => Store.setProject(Object.assign(Store.getProject(), changes)));
 
   const startNewProject = useCallback(
-    (name) => {
+    (name: string) => {
       safely(() => Store.setRows([], { dirty: false }));
       safely(() => Store.setProject({ id: uid(), name, createdAt: Date.now(), savedAt: null, dirty: false, closed: false }));
       setFilter('');
@@ -105,7 +114,7 @@ function TablePage() {
         if (!quiet) toast('Nothing to save yet: copy some text first.');
         return false;
       }
-      const doc = {
+      const doc: ProjectDoc = {
         id: p.id || uid(),
         name: p.name,
         createdAt: p.createdAt,
@@ -117,7 +126,7 @@ function TablePage() {
       try {
         await Library.put(doc);
       } catch (e) {
-        toast('Could not save: ' + (e?.message || e));
+        toast('Could not save: ' + errMsg(e));
         return false;
       }
       updateProject({ id: doc.id, savedAt: doc.savedAt, dirty: false, closed: close });
@@ -141,7 +150,8 @@ function TablePage() {
    * fromClipboard: the text is what is on the clipboard now (remember it, so it isn't read twice).
    */
   const handleText = useCallback(
-    (text, { force = false, fromClipboard = true } = {}) => {
+    (input: string, { force = false, fromClipboard = true }: { force?: boolean; fromClipboard?: boolean } = {}): Row[] => {
+      let text = input;
       text = String(text || '');
       if (!text.trim()) {
         if (force) toast('The clipboard has no text');
@@ -156,7 +166,7 @@ function TablePage() {
       const s = Store.getSettings();
       const extracted = extract(text, s);
       // A saved project is never changed by new data: start a new one.
-      let savedName = null;
+      let savedName: string | null = null;
       if (extracted.length && Store.getProject().closed) {
         savedName = Store.getProject().name;
         startNewProject(uniqueName(defaultProjectName(), { includeCurrent: false }));
@@ -177,10 +187,10 @@ function TablePage() {
 
   // ---------- clipboard watcher ----------
 
-  const detectMode = useCallback(async () => {
+  const detectMode = useCallback(async (): Promise<Mode> => {
     if (!window.isSecureContext || !navigator.clipboard?.readText) return 'paste';
     try {
-      const status = await navigator.permissions.query({ name: 'clipboard-read' });
+      const status = await navigator.permissions.query({ name: 'clipboard-read' as PermissionName });
       status.onchange = () => setMode(permissionToMode(status.state));
       return permissionToMode(status.state);
     } catch {
@@ -200,11 +210,11 @@ function TablePage() {
         if (manual && modeRef.current === 'prompt') setMode('auto');
       } catch (e) {
         if (manual) {
-          if (e?.name === 'NotAllowedError') {
+          if ((e as { name?: string } | null)?.name === 'NotAllowedError') {
             const m = await detectMode();
             setMode(m);
             if (m !== 'auto') toast(`Clipboard access was not allowed. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V'} to add text instead.`);
-          } else toast('Could not read the clipboard: ' + (e?.message || e));
+          } else toast('Could not read the clipboard: ' + errMsg(e));
         }
       } finally {
         busy.current = false;
@@ -250,8 +260,8 @@ function TablePage() {
 
   // Ctrl/⌘+V anywhere on the page (except in form fields) adds the pasted text.
   useEffect(() => {
-    const onPaste = (e) => {
-      if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+    const onPaste = (e: ClipboardEvent) => {
+      if ((e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       const text = e.clipboardData?.getData('text/plain');
       if (!text) return;
       e.preventDefault();
@@ -262,9 +272,9 @@ function TablePage() {
   }, [handleText]);
 
   // Ctrl/⌘+S saves (Shift: download the project file).
-  const downloadProjectFileRef = useRef(null);
+  const downloadProjectFileRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (e.shiftKey) downloadProjectFileRef.current?.();
@@ -281,7 +291,7 @@ function TablePage() {
     if (!p.id) safely(() => Store.setProject(Object.assign(p, { id: uid() })));
   }, [safely]);
 
-  const setEnabled = (on) => {
+  const setEnabled = (on: boolean) => {
     safely(() => Store.saveSettings({ ...Store.getSettings(), enabled: on }));
     if (!on) return toast('Auto-read is OFF. Copies are not read until you turn it back on.');
     if (mode === 'prompt') return readClipboard(true); // this click lets the browser ask for permission
@@ -303,14 +313,14 @@ function TablePage() {
     const idx = new Map(rows.map((r, i) => [r.id, i]));
     list.sort((a, b) => {
       // Newest capture first by default, but rows of one capture stay in clipboard order.
-      if (sort.col === '__time') return (a.capturedAt - b.capturedAt) * dir || idx.get(a.id) - idx.get(b.id);
+      if (sort.col === '__time') return (a.capturedAt - b.capturedAt) * dir || (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0);
       return String(a.data[sort.col] ?? '').localeCompare(String(b.data[sort.col] ?? ''), undefined, { numeric: true, sensitivity: 'base' }) * dir;
     });
     return list;
   }, [rows, filter, sort]);
 
-  const onSort = (key) => setSort((s) => (s.col === key ? { col: key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col: key, dir: 'asc' }));
-  const onEdit = (id, col, value) => {
+  const onSort = (key: string) => setSort((s): SortState => (s.col === key ? { col: key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col: key, dir: 'asc' }));
+  const onEdit = (id: string, col: string, value: string) => {
     const next = Store.getRows().map((r) => {
       if (r.id !== id) return r;
       const data = { ...r.data };
@@ -321,8 +331,8 @@ function TablePage() {
     });
     safely(() => Store.setRows(next));
   };
-  const onDelete = (id) => safely(() => Store.setRows(Store.getRows().filter((r) => r.id !== id)));
-  const explainInAdmin = (text) => {
+  const onDelete = (id: string) => safely(() => Store.setRows(Store.getRows().filter((r) => r.id !== id)));
+  const explainInAdmin = (text: string) => {
     safely(() => Store.setDraft(text));
     window.location.href = `${BASE_PATH}/admin/#test`;
   };
@@ -336,7 +346,7 @@ function TablePage() {
 
   // ---------- downloads ----------
 
-  const downloadPdf = (name, list) => {
+  const downloadPdf = (name: string, list: Row[]) => {
     if (!list.length) return toast('Nothing to download yet');
     const { bytes, unsupported } = pdfOf(name, list);
     download(`${safeFileName(name)}.pdf`, 'application/pdf', bytes);
@@ -344,21 +354,21 @@ function TablePage() {
       toast(`Some characters (${unsupported.slice(0, 5).join(' ')}) can't be shown in this PDF. Use Download → Print / Save as PDF for those.`);
     }
   };
-  const downloadCsv = (name, list) => {
+  const downloadCsv = (name: string, list: Row[]) => {
     if (!list.length) return toast('Nothing to download yet');
     download(`${safeFileName(name)}.csv`, 'text/csv;charset=utf-8', csvOf(list));
   };
-  const downloadProjectFile = async (doc) => {
+  const downloadProjectFile = async (doc: ProjectDoc) => {
     try {
       const res = await saveTextFile({ suggestedName: safeFileName(doc.name) + '.json', text: JSON.stringify(fileOf(doc), null, 2) });
       if (res) toast(`Project file saved: ${res.fileName}`);
     } catch (e) {
-      toast('Could not save the file: ' + (e?.message || e));
+      toast('Could not save the file: ' + errMsg(e));
     }
   };
-  const currentDoc = () => {
+  const currentDoc = (): ProjectDoc => {
     const p = Store.getProject();
-    return { id: p.id, name: p.name, createdAt: p.createdAt, savedAt: Date.now(), rules: rulesOf(Store.getSettings()), rows: Store.getRows() };
+    return { id: p.id || uid(), name: p.name, createdAt: p.createdAt, savedAt: Date.now(), rules: rulesOf(Store.getSettings()), rows: Store.getRows() };
   };
   downloadProjectFileRef.current = () => downloadProjectFile(currentDoc());
 
@@ -384,9 +394,9 @@ function TablePage() {
       a.remove();
     },
   };
-  const runDownload = (kind) => {
+  const runDownload = (kind: keyof typeof DOWNLOADS) => {
     setMenuOpen(false);
-    Promise.resolve(DOWNLOADS[kind]()).catch((e) => toast('Download failed: ' + (e?.message || e)));
+    Promise.resolve(DOWNLOADS[kind]()).catch((e) => toast('Download failed: ' + errMsg(e)));
   };
   useDismiss(menuRef, menuOpen, useCallback(() => setMenuOpen(false), []));
 
@@ -405,7 +415,7 @@ function TablePage() {
 
   // ---------- open / new project ----------
 
-  const openDoc = async (doc) => {
+  const openDoc = async (doc: ProjectDoc) => {
     const p = Store.getProject();
     if (doc.id === p.id && !p.dirty) return setProjectsOpen(false);
     if (doc.id !== p.id && !(await keepCurrentSafe())) return;
@@ -430,24 +440,24 @@ function TablePage() {
     try {
       p = parseProject(JSON.parse(picked.text), picked.name);
     } catch (err) {
-      return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+      return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : errMsg(err));
     }
-    const doc = { id: uid(), name: uniqueName(p.name), createdAt: p.createdAt, savedAt: Date.now(), rowCount: p.rows.length, rules: p.rules, rows: p.rows };
+    const doc: ProjectDoc = { id: uid(), name: uniqueName(p.name), createdAt: p.createdAt, savedAt: Date.now(), rowCount: p.rows.length, rules: p.rules, rows: p.rows };
     try {
       await Library.put(doc);
     } catch (e) {
-      return toast('Could not add the project: ' + (e?.message || e));
+      return toast('Could not add the project: ' + errMsg(e));
     }
     await openDoc(doc);
   };
 
-  const withDoc = (id, fn) => async () => {
+  const withDoc = (id: string, fn: (doc: ProjectDoc) => unknown) => async () => {
     const doc = await Library.get(id);
     if (!doc) return toast('That project no longer exists.');
     return fn(doc);
   };
 
-  const deleteProject = async (p) => {
+  const deleteProject = async (p: ProjectSummary) => {
     if (!confirm(`Delete "${p.name}" (${plural(p.rowCount, 'row')}) from Projects? This cannot be undone.`)) return;
     await Library.remove(p.id);
     if (p.id === Store.getProject().id) updateProject({ savedAt: null, dirty: Store.getRows().length > 0, closed: false });
@@ -456,7 +466,7 @@ function TablePage() {
 
   // ---------- phone: Paste button ----------
 
-  const openTypeBox = (afterPasteFailed) => {
+  const openTypeBox = (afterPasteFailed: boolean) => {
     setManualOpen(true);
     setTimeout(() => {
       manualRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -481,6 +491,18 @@ function TablePage() {
   };
 
   // ---------- render ----------
+
+  /** "More" sheet entries: icon, label, action, test id. */
+  const moreItems: [string, string, () => unknown, string?][] = [
+    ['＋', 'New project', () => setNewOpen(true)],
+    ...(mode === 'auto' ? [['↻', 'Read clipboard again', () => readClipboard(true)] as [string, string, () => unknown]] : []),
+    ['⇩', 'Download PDF', () => runDownload('pdf'), 'pdf'],
+    ['⇩', 'Download CSV (Excel)', () => runDownload('csv'), 'csv'],
+    ['⇩', 'Download project file', () => runDownload('file')],
+    ['⎙', 'Print / Save as PDF', () => runDownload('print')],
+    ['⧉', 'Copy table', copyTable],
+    ['✎', 'Type or paste text', () => openTypeBox(false)],
+  ];
 
   const on = settings.enabled;
   const pasteHint = isTouch ? 'tap Paste' : 'press Ctrl/⌘+V';
@@ -509,7 +531,7 @@ function TablePage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={`${BASE_PATH}/icons/icon32.png`} alt="" width="24" height="24" />
           <h1>Clipboard Extractor</h1>
-          <ProjectName name={project.name} onRename={(name) => name !== project.name && updateProject({ name, dirty: true })}>
+          <ProjectName name={project.name} onRename={(name: string) => name !== project.name && updateProject({ name, dirty: true })}>
             <span className={saveState.cls} title={saveState.title} id="saveState">
               {saveState.text}
             </span>
@@ -780,16 +802,7 @@ function TablePage() {
       <Modal open={moreOpen} onClose={() => setMoreOpen(false)} className="sheet" id="moreSheet">
         <div className="sheet-grip" />
         <div className="sheet-list" id="moreList">
-          {[
-            ['＋', 'New project', () => setNewOpen(true)],
-            ...(mode === 'auto' ? [['↻', 'Read clipboard again', () => readClipboard(true)]] : []),
-            ['⇩', 'Download PDF', () => runDownload('pdf'), 'pdf'],
-            ['⇩', 'Download CSV (Excel)', () => runDownload('csv'), 'csv'],
-            ['⇩', 'Download project file', () => runDownload('file')],
-            ['⎙', 'Print / Save as PDF', () => runDownload('print')],
-            ['⧉', 'Copy table', copyTable],
-            ['✎', 'Type or paste text', () => openTypeBox(false)],
-          ].map(([icon, label, fn, key]) => (
+          {moreItems.map(([icon, label, fn, key]) => (
             <button
               key={label}
               data-action={key}
@@ -832,7 +845,7 @@ function TablePage() {
 }
 
 /** Editable project name: saved on blur or Enter. */
-function ProjectName({ name, onRename, children }) {
+function ProjectName({ name, onRename, children }: { name: string; onRename: (name: string) => void; children?: ReactNode }) {
   const [value, setValue] = useState(name);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -863,9 +876,18 @@ function ProjectName({ name, onRename, children }) {
   );
 }
 
-function NewProjectDialog({ open, onClose, suggestedName, note, onCreate }) {
+interface NewProjectDialogProps {
+  open: boolean;
+  onClose: () => void;
+  suggestedName: string;
+  /** Shown when the current project will be saved first. */
+  note: string;
+  onCreate: (name: string) => void;
+}
+
+function NewProjectDialog({ open, onClose, suggestedName, note, onCreate }: NewProjectDialogProps) {
   const [name, setName] = useState(suggestedName);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (open) {
       setName(suggestedName);

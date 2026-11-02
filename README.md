@@ -4,7 +4,7 @@ A web app that **reads your clipboard automatically**, **extracts the data you c
 and **collects it in a table**. One copy can produce **many rows**: every contact in a list,
 every line of a spreadsheet, every email in a paragraph.
 
-Built with **Next.js 16** (App Router) and **React 19**. It is exported as a static site (no server
+Built with **Next.js 16** (App Router), **React 19** and **TypeScript** (strict mode). It is exported as a static site (no server
 code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in your browser.
 
 ## Features
@@ -88,11 +88,12 @@ Browsers only let a web page read the clipboard **while its tab is focused**, an
 
 ## Run it
 
-Needs Node.js 18.18 or newer (20+ recommended).
+Needs Node.js 22.18 or newer (it runs the TypeScript tests and scripts directly).
 
 ```bash
 npm install
 npm run dev      # development server with hot reload: http://localhost:3000
+npm run typecheck  # TypeScript check (strict)
 npm test         # unit tests for the extraction engine, templates, PDF and ZIP writers
 npm run build    # static export to ./out
 npm start        # serve ./out at http://localhost:8080
@@ -104,7 +105,7 @@ To serve the app from a sub-path, build with `BASE_PATH`, e.g. `BASE_PATH=/Clipb
 
 ### Host on GitHub Pages
 
-The workflow in `.github/workflows/pages.yml` runs the tests, builds the static site (with the right
+The workflow in `.github/workflows/pages.yml` runs the type check and tests, builds the static site (with the right
 base path for your repository) and deploys it on every push to `main`.
 Turn it on once under **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
@@ -127,20 +128,24 @@ Turn it on once under **Settings → Pages → Build and deployment → Source: 
 
 | Path | What it is |
 | --- | --- |
-| `app/layout.jsx` | root layout: page metadata, manifest, global styles |
-| `app/page.jsx` | `/`: the table page |
-| `app/admin/page.jsx` | `/admin`: the admin panel |
+| `app/layout.tsx` | root layout: page metadata, manifest, global styles |
+| `app/page.tsx` | `/`: the table page |
+| `app/admin/page.tsx` | `/admin`: the admin panel |
 | `app/globals.css` | styles (light and dark, desktop and phone layouts) |
-| `components/TableApp.jsx` | table page: clipboard watcher, auto-read switch, projects, downloads, phone bar |
-| `components/DataTable.jsx` | the rows table (cards on phones), sorting and inline editing |
-| `components/AdminApp.jsx` | admin panel: rules editor, regex templates, test & explain, settings |
-| `components/common.jsx` | toast, modal dialog, store-sync and touch hooks |
-| `lib/extractor.js` | extraction engine with `extract()` and `explain()` (pure JS, unit tested) |
-| `lib/templates.js` | regex template library and quick reference |
-| `lib/store.js` | browser storage: current project (`localStorage`), saved Projects (IndexedDB), cross-tab sync |
-| `lib/projectio.js` | project files and CSV / JSON / PDF exports |
-| `lib/files.js` | downloads, saving and opening files |
-| `lib/pdf.js`, `lib/zip.js` | small dependency-free PDF and ZIP writers |
+| `components/TableApp.tsx` | table page: clipboard watcher, auto-read switch, projects, downloads, phone bar |
+| `components/DataTable.tsx` | the rows table (cards on phones), sorting and inline editing |
+| `components/AdminApp.tsx` | admin panel: rules editor, regex templates, test & explain, settings |
+| `components/common.tsx` | toast, modal dialog, store-sync and touch hooks |
+| `lib/types.ts` | shared types: settings, rules, rows, projects, extraction trace |
+| `lib/extractor.ts` | extraction engine with `extract()` and `explain()` (pure, unit tested) |
+| `lib/templates.ts` | regex template library and quick reference |
+| `lib/store.ts` | browser storage: current project (`localStorage`), saved Projects (IndexedDB), cross-tab sync |
+| `lib/projectio.ts` | project files and CSV / JSON / PDF exports |
+| `lib/files.ts` | downloads, saving and opening files |
+| `lib/pdf.ts`, `lib/zip.ts` | small dependency-free PDF and ZIP writers |
 | `public/` | icons and the web app manifest |
 | `scripts/` | build helpers: pack the source zip, serve the static build |
 | `test/` | `npm test`: unit tests |
+
+The code uses only TypeScript syntax that can be erased (`erasableSyntaxOnly`), and imports use `.ts`
+extensions, so Node runs the tests and scripts directly while Next.js builds the app.

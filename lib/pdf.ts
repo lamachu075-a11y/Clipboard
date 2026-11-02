@@ -9,7 +9,7 @@
  */
 
 // Helvetica glyph widths (1/1000 em) for ASCII 32–126.
-const W = [
+const W: readonly number[] = [
   278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
   556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
   1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
@@ -19,7 +19,7 @@ const W = [
 ];
 
 // Unicode -> WinAnsi (cp1252) for the 0x80–0x9F range.
-const CP1252 = {
+const CP1252: Record<number, number> = {
   0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87,
   0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a, 0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91,
   0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, 0x02dc: 0x98,
@@ -27,8 +27,8 @@ const CP1252 = {
 };
 
 /** WinAnsi byte for a character, or null if it can't be shown. */
-function winAnsi(ch) {
-  const c = ch.codePointAt(0);
+function winAnsi(ch: string): number | null {
+  const c = ch.codePointAt(0) ?? 0;
   if (c === 9) return 32;
   if (c >= 32 && c <= 126) return c;
   if (c >= 0xa0 && c <= 0xff) return c;
@@ -36,26 +36,26 @@ function winAnsi(ch) {
 }
 
 /** Characters in `text` that the PDF fonts can't display. */
-function unsupported(text) {
-  const out = new Set();
+function unsupported(text: string): string[] {
+  const out = new Set<string>();
   for (const ch of String(text)) if (ch !== '\n' && ch !== '\r' && winAnsi(ch) === null) out.add(ch);
   return [...out];
 }
 
-function charWidth(ch, bold) {
+function charWidth(ch: string, bold: boolean): number {
   const b = winAnsi(ch);
   const w = b !== null && b >= 32 && b <= 126 ? W[b - 32] : 556;
   return bold ? w * 1.06 : w;
 }
 
-const textWidth = (s, size, bold) => {
+const textWidth = (s: string, size: number, bold: boolean): number => {
   let w = 0;
   for (const ch of s) w += charWidth(ch, bold);
   return (w * size) / 1000;
 };
 
 /** PDF string literal (WinAnsi bytes, escaped). */
-function pdfString(s) {
+function pdfString(s: string): string {
   let out = '(';
   for (const ch of s) {
     const b = winAnsi(ch) ?? 63; // "?"
@@ -67,7 +67,7 @@ function pdfString(s) {
 }
 
 /** Cut text to fit `width`, adding an ellipsis. */
-function truncate(s, width, size, bold) {
+function truncate(s: string, width: number, size: number, bold: boolean): string {
   if (textWidth(s, size, bold) <= width) return s;
   const ell = '…';
   let out = '';
@@ -79,8 +79,8 @@ function truncate(s, width, size, bold) {
 }
 
 /** Word-wrap text into at most `maxLines` lines of `width`. */
-function wrap(text, width, size, bold, maxLines) {
-  const lines = [];
+function wrap(text: string, width: number, size: number, bold: boolean, maxLines: number): string[] {
+  const lines: string[] = [];
   for (const para of String(text).replace(/\r/g, '').split('\n')) {
     let line = '';
     for (const word of para.split(/(\s+)/)) {
@@ -117,14 +117,20 @@ function wrap(text, width, size, bold, maxLines) {
   return lines;
 }
 
-const num = (n) => (Math.round(n * 100) / 100).toString();
+const num = (n: number): string => (Math.round(n * 100) / 100).toString();
 
-/**
- * Build a PDF with a title and a table that flows over as many pages as needed.
- * @param {{title: string, subtitle?: string, columns: string[], rows: string[][], landscape?: boolean, footer?: string}} opts
- * @returns {Uint8Array}
- */
-function table({ title, subtitle = '', columns, rows, landscape = true, footer = '' }) {
+export interface TableOptions {
+  title: string;
+  subtitle?: string;
+  columns: string[];
+  rows: string[][];
+  landscape?: boolean;
+  /** Text before the page numbers at the bottom of every page. */
+  footer?: string;
+}
+
+/** Build a PDF with a title and a table that flows over as many pages as needed. */
+function table({ title, subtitle = '', columns, rows, landscape = true, footer = '' }: TableOptions): Uint8Array<ArrayBuffer> {
   const pageW = landscape ? 842 : 595;
   const pageH = landscape ? 595 : 842;
   const margin = 36;
@@ -146,15 +152,15 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   let widths = natural.map((w) => (w / total) * usable);
   if (total < usable) widths = natural.map((w) => w + (usable - total) / natural.length);
 
-  const pages = [];
-  let ops = [];
+  const pages: string[][] = [];
+  let ops: string[] = [];
   let y = 0;
 
-  const text = (s, x, yy, bold, sz = size) => ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(sz)} Tf ${num(x)} ${num(yy)} Td ${pdfString(s)} Tj ET`);
-  const rect = (x, yy, w, h, gray) => ops.push(`${num(gray)} g ${num(x)} ${num(yy)} ${num(w)} ${num(h)} re f 0 g`);
-  const line = (x1, y1, x2, y2) => ops.push(`0.82 G 0.5 w ${num(x1)} ${num(y1)} m ${num(x2)} ${num(y2)} l S`);
+  const text = (s: string, x: number, yy: number, bold: boolean, sz: number = size): number => ops.push(`BT /${bold ? 'F2' : 'F1'} ${num(sz)} Tf ${num(x)} ${num(yy)} Td ${pdfString(s)} Tj ET`);
+  const rect = (x: number, yy: number, w: number, h: number, gray: number): number => ops.push(`${num(gray)} g ${num(x)} ${num(yy)} ${num(w)} ${num(h)} re f 0 g`);
+  const line = (x1: number, y1: number, x2: number, y2: number): number => ops.push(`0.82 G 0.5 w ${num(x1)} ${num(y1)} m ${num(x2)} ${num(y2)} l S`);
 
-  function headerRow() {
+  function headerRow(): void {
     const cells = columns.map((c, i) => wrap(String(c), widths[i] - padX * 2, headSize, true, 2));
     const h = Math.max(...cells.map((l) => l.length)) * lineH + padY * 2;
     rect(margin, y - h, usable, h, 0.92);
@@ -167,7 +173,7 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
     y -= h;
   }
 
-  function newPage(first) {
+  function newPage(first: boolean): void {
     if (ops.length) pages.push(ops);
     ops = [];
     y = pageH - margin;
@@ -211,13 +217,13 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   });
 
   // Assemble objects.
-  const objects = [];
-  const add = (body) => objects.push(body) && objects.length;
+  const objects: (string | null)[] = [];
+  const add = (body: string | null): number => objects.push(body) && objects.length;
   const catalog = add(null);
   const pagesObj = add(null);
   const f1 = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   const f2 = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
-  const kids = [];
+  const kids: number[] = [];
   for (const p of pages) {
     const stream = p.join('\n');
     const content = add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
@@ -233,7 +239,7 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   objects[pagesObj - 1] = `<< /Type /Pages /Kids [${kids.map((k) => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
 
   let out = '%PDF-1.4\n%âãÏÓ\n';
-  const offsets = [];
+  const offsets: number[] = [];
   objects.forEach((body, i) => {
     offsets.push(out.length);
     out += `${i + 1} 0 obj\n${body}\nendobj\n`;
