@@ -23,7 +23,12 @@ locally or host it on GitHub Pages. Everything stays in your browser (`localStor
   - Several matches in one record become one row per match, or are joined into one cell.
 - **Table:** sort by any column, filter, double-click a cell to edit, delete rows. Rows from the
   same copy are shaded as a group. Open tabs stay in sync.
-- **Export:** CSV (opens in Excel), JSON, or **Copy** as tab-separated text for Excel / Google Sheets.
+- **Download menu:**
+  - **Table as CSV** (opens in Excel and Google Sheets) or **Table as JSON**.
+  - **Project file:** all rows and settings in one `.json` file. Use **Open project** to load it again,
+    on this or another computer. You can replace the current table or add to it. A *Table as JSON* download can be opened too.
+  - **App source code (.zip):** the app's own files, ready to run or host anywhere.
+- **Copy** puts the table on the clipboard as tab-separated text, ready to paste into Excel or Google Sheets.
 - **Installable** as an app (PWA manifest): use "Install app" in Chrome or Edge, or "Add to Home Screen".
 
 ## Browser support for automatic reading
@@ -76,6 +81,7 @@ Two rows (Name, Email, Phone) appear.
 | `index.html` | the app page |
 | `js/extractor.js` | extraction engine (pure JS, no DOM, unit tested) |
 | `js/store.js` | `localStorage` persistence, cross-tab change events |
-| `js/app.js` | clipboard watcher, table, export, settings |
+| `js/app.js` | clipboard watcher, table, downloads, open project, settings |
+| `js/zip.js` | small dependency-free ZIP writer used for "App source code" |
 | `css/app.css` | styles (light and dark) |
-| `test/` | `npm test`: extractor unit tests (Node 18+) |
+| `test/` | `npm test`: unit tests for the extractor and ZIP writer (Node 18+) |

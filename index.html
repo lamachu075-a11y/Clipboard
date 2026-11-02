@@ -24,8 +24,17 @@
         <button id="readNow" title="Read the clipboard now, even if it was already captured">Read clipboard</button>
         <input type="search" id="search" placeholder="Filter rows…" aria-label="Filter rows" />
         <button id="copyTsv" title="Copy the visible rows as tab-separated text (paste into Excel/Sheets)">Copy</button>
-        <button id="exportCsv">Export CSV</button>
-        <button id="exportJson">Export JSON</button>
+        <details class="menu" id="downloadMenu">
+          <summary>Download ▾</summary>
+          <div class="menu-list">
+            <button data-download="csv">Table as CSV<small>Opens in Excel and Google Sheets</small></button>
+            <button data-download="json">Table as JSON<small>For other programs</small></button>
+            <button data-download="project">Project file<small>All rows and settings; open it again later</small></button>
+            <button data-download="app">App source code (.zip)<small>Run your own copy of this app</small></button>
+          </div>
+        </details>
+        <button id="openProject" title="Open a project file (or a JSON table export)">Open project</button>
+        <input type="file" id="projectFile" accept=".json,application/json" hidden />
         <button id="clear" class="danger">Clear</button>
         <button id="toggleSettings" aria-expanded="false">Settings</button>
       </div>
@@ -117,6 +126,7 @@
 
     <script src="js/extractor.js"></script>
     <script src="js/store.js"></script>
+    <script src="js/zip.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

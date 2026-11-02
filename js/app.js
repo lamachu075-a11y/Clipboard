@@ -349,23 +349,191 @@
 
   const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 
-  $('exportCsv').addEventListener('click', () => {
-    if (!rows.length) return toast('Nothing to export');
-    const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
-    const csv = exportMatrix()
-      .map((r) => r.map(esc).join(','))
-      .join('\r\n');
-    download(`clipboard-${stamp()}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
+  const DOWNLOADS = {
+    csv() {
+      if (!rows.length) return toast('Nothing to download yet');
+      const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+      const csv = exportMatrix()
+        .map((r) => r.map(esc).join(','))
+        .join('\r\n');
+      download(`clipboard-${stamp()}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
+    },
+
+    json() {
+      if (!rows.length) return toast('Nothing to download yet');
+      const data = visibleRows().map((r) => {
+        const o = { capturedAt: new Date(r.capturedAt).toISOString() };
+        for (const c of Store.columnsOf(r)) o[c] = r.data[c];
+        return o;
+      });
+      download(`clipboard-${stamp()}.json`, 'application/json', JSON.stringify(data, null, 2));
+    },
+
+    /** Everything needed to restore this workspace: all rows + settings. */
+    project() {
+      const project = {
+        app: PROJECT_APP,
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings,
+        rows,
+      };
+      download(`clipboard-project-${stamp()}.json`, 'application/json', JSON.stringify(project, null, 2));
+      toast(`Project saved (${rows.length} row${rows.length === 1 ? '' : 's'})`);
+    },
+
+    /** The app's own files, zipped, so it can be run or hosted anywhere. */
+    async app() {
+      toast('Preparing download…');
+      const files = [];
+      const missing = [];
+      for (const path of APP_FILES) {
+        try {
+          const res = await fetch(path, { cache: 'no-cache' });
+          if (!res.ok) throw new Error(res.status);
+          files.push({ name: 'clipboard-extractor/' + path, data: new Uint8Array(await res.arrayBuffer()) });
+        } catch {
+          missing.push(path);
+        }
+      }
+      if (!files.some((f) => f.name.endsWith('/index.html'))) {
+        return toast('Could not read the app files. Open the app from a web server (http/https) to download it.');
+      }
+      if (!files.some((f) => /README\.md$/.test(f.name))) {
+        files.push({ name: 'clipboard-extractor/README.txt', data: APP_README });
+      }
+      const zip = window.ClipZip.create(files);
+      download(`clipboard-extractor-app-${stamp()}.zip`, 'application/zip', zip);
+      toast(`Downloaded ${files.length} files`);
+    },
+  };
+
+  const PROJECT_APP = 'clipboard-extractor';
+  const APP_FILES = [
+    'index.html',
+    'manifest.webmanifest',
+    'css/app.css',
+    'js/extractor.js',
+    'js/store.js',
+    'js/zip.js',
+    'js/app.js',
+    'icons/icon16.png',
+    'icons/icon32.png',
+    'icons/icon48.png',
+    'icons/icon128.png',
+    'icons/icon192.png',
+    'icons/icon512.png',
+    'README.md',
+    'package.json',
+    'test/extractor.test.js',
+    'test/zip.test.js',
+  ];
+  const APP_README = [
+    'Clipboard Extractor',
+    '',
+    'Run it:  python3 -m http.server 8080   then open http://localhost:8080',
+    '(or open index.html directly; Ctrl/Cmd+V works everywhere, automatic',
+    'clipboard reading needs http://localhost or https).',
+    '',
+  ].join('\n');
+
+  const menu = $('downloadMenu');
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-download]');
+    if (!btn) return;
+    menu.open = false;
+    Promise.resolve(DOWNLOADS[btn.dataset.download]()).catch((err) => toast('Download failed: ' + (err?.message || err)));
+  });
+  document.addEventListener('click', (e) => {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.open) menu.open = false;
   });
 
-  $('exportJson').addEventListener('click', () => {
-    if (!rows.length) return toast('Nothing to export');
-    const data = visibleRows().map((r) => {
-      const o = { capturedAt: new Date(r.capturedAt).toISOString() };
-      for (const c of Store.columnsOf(r)) o[c] = r.data[c];
-      return o;
-    });
-    download(`clipboard-${stamp()}.json`, 'application/json', JSON.stringify(data, null, 2));
+  // ---------- open project ----------
+
+  /** Accepts a project file, or a "Table as JSON" download (array of objects). */
+  function parseProject(obj) {
+    const toRow = (data, capturedAt, clipId, extra = {}) => {
+      const clean = {};
+      const cols = [];
+      for (const [k, v] of Object.entries(data || {})) {
+        if (v == null || v === '' || typeof v === 'object') continue;
+        clean[String(k)] = String(v);
+        cols.push(String(k));
+      }
+      const ts = Number.isFinite(capturedAt) ? capturedAt : Date.parse(capturedAt);
+      return {
+        id: Store.uid(),
+        clipId: clipId || Store.uid(),
+        capturedAt: Number.isFinite(ts) ? ts : Date.now(),
+        data: clean,
+        cols: Array.isArray(extra.cols) ? extra.cols.filter((c) => c in clean) : cols,
+        source: typeof extra.source === 'string' ? extra.source : '',
+      };
+    };
+
+    if (obj && obj.app === PROJECT_APP && Array.isArray(obj.rows)) {
+      return {
+        settings: obj.settings ? E.normalizeSettings(obj.settings) : null,
+        rows: obj.rows
+          .filter((r) => r && typeof r.data === 'object')
+          .map((r) => Object.assign(toRow(r.data, r.capturedAt, r.clipId, r), { id: typeof r.id === 'string' ? r.id : Store.uid() })),
+      };
+    }
+    if (Array.isArray(obj) && obj.every((x) => x && typeof x === 'object' && !Array.isArray(x))) {
+      const clipId = Store.uid();
+      return {
+        settings: null,
+        rows: obj.map(({ capturedAt, ...data }) => toRow(data, capturedAt, clipId)),
+      };
+    }
+    throw new Error('This is not a Clipboard Extractor project file.');
+  }
+
+  $('openProject').addEventListener('click', () => $('projectFile').click());
+  $('projectFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    let project;
+    try {
+      project = parseProject(JSON.parse(await file.text()));
+    } catch (err) {
+      return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+    }
+    if (!project.rows.length && !project.settings) return toast('The file has no rows');
+
+    let replace = true;
+    if (rows.length) {
+      replace = confirm(
+        `Open "${file.name}" (${project.rows.length} rows)?\n\n` +
+          `OK: replace the current table (${rows.length} rows)\nCancel: add its rows to the current table`
+      );
+    }
+    let next;
+    if (replace) next = project.rows;
+    else {
+      const ids = new Set(rows.map((r) => r.id));
+      const keys = settings.dedupeRows ? new Set(rows.map((r) => E.rowKey(r.data))) : null;
+      next = rows.concat(
+        project.rows.filter((r) => !ids.has(r.id) && !(keys && keys.has(E.rowKey(r.data))))
+      );
+    }
+    const added = next.length - (replace ? 0 : rows.length);
+    if (project.settings && replace) {
+      settings = project.settings;
+      safely(() => Store.saveSettings(settings));
+      renderSettings();
+      renderStatus();
+      startPolling();
+    }
+    rows = next;
+    knownIds = new Set(); // highlight what was loaded
+    safely(() => Store.setRows(rows));
+    render();
+    toast(replace ? `Opened project: ${rows.length} rows` : `Added ${added} row${added === 1 ? '' : 's'} from the project`);
   });
 
   $('copyTsv').addEventListener('click', async () => {
