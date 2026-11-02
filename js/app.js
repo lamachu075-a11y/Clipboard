@@ -11,7 +11,6 @@
   let rows = Store.getRows();
   let settings = Store.getSettings();
   let project = Store.getProject();
-  let fileHandle = null; // where "Save" writes (Chrome/Edge); cleared on New project
   let sort = { col: '__time', dir: 'desc' };
   let filter = '';
   let knownIds = new Set(rows.map((r) => r.id)); // to highlight new rows
@@ -128,11 +127,14 @@
     safely(() => Store.setLastText(text));
 
     const extracted = E.extract(text, settings);
+    // The current project was saved: new data goes into a new project.
+    const savedName = extracted.length ? ensureOpenProject() : null;
     const added =
       safely(() => Store.addRows(extracted, { source: settings.keepSource ? text : '', dedupe: settings.dedupeRows })) || [];
 
     if (added.length) {
-      toast(`Added ${added.length} row${added.length === 1 ? '' : 's'}`);
+      const n = `${added.length} row${added.length === 1 ? '' : 's'}`;
+      toast(savedName ? `"${savedName}" stays saved. Added ${n} to new project "${project.name}".` : `Added ${n}`);
       flashTitle(added.length);
     } else if (force) {
       toast(extracted.length ? 'Already in the table' : 'Nothing to extract from that text. See the Admin panel to add a rule.');
@@ -232,7 +234,7 @@
         th('#'),
         th('Captured', '__time'),
         ...cols.map((c) => th(c, c)),
-        ...(settings.keepSource ? [th('Source text')] : []),
+        ...(settings.keepSource ? [Object.assign(th('Source text'), { className: 'nosort source-col' })] : []),
         th(''),
       ])
     );
@@ -331,6 +333,14 @@
   });
 
   // ---------- projects ----------
+  //
+  // The current project lives in localStorage (rows + project info). "Save
+  // project" copies it into the Projects list (IndexedDB) and marks it as
+  // saved. After that, the next extraction starts a new project, so a saved
+  // project is never changed by new clipboard data unless you choose
+  // "Keep adding to this project".
+
+  const Library = Store.Library;
 
   function renderProject() {
     if (document.activeElement !== $('projectName')) $('projectName').value = project.name;
@@ -339,15 +349,19 @@
     if (project.dirty) {
       st.textContent = '● Unsaved';
       st.className = 'save-state dirty';
-      st.title = 'This project has changes that are not saved to a file yet. Click Save (Ctrl/⌘+S).';
+      st.title = 'This project has changes that are not saved yet. Click "Save project" (Ctrl/⌘+S).';
     } else if (project.savedAt) {
-      st.textContent = 'Saved';
+      st.textContent = '✓ Saved';
       st.className = 'save-state saved';
-      st.title = `Saved ${new Date(project.savedAt).toLocaleString()}${project.fileName ? ' to ' + project.fileName : ''}`;
+      st.title = `Saved to Projects ${new Date(project.savedAt).toLocaleString()}`;
     } else {
       st.textContent = '';
       st.className = 'save-state';
+      st.title = '';
     }
+    $('savedBanner').hidden = !(project.closed && !project.dirty);
+    $('savedName').textContent = `"${project.name}"`;
+    $('printTitle').textContent = project.name;
   }
 
   function updateProject(changes) {
@@ -363,37 +377,56 @@
   });
   $('projectName').addEventListener('keydown', (e) => e.key === 'Enter' && e.target.blur());
 
-  /** The whole project as one self-contained file: rows + the rules used. */
-  function projectFile() {
+  $('keepAdding').addEventListener('click', () => {
+    updateProject({ closed: false });
+    toast(`New copies will be added to "${project.name}"`);
+  });
+
+  /** Everything about the current project, as stored in Projects and in files. */
+  function projectDoc() {
     return {
-      app: PROJECT_APP,
-      type: 'project',
-      version: 2,
+      id: project.id,
       name: project.name,
-      createdAt: new Date(project.createdAt).toISOString(),
-      savedAt: new Date().toISOString(),
+      createdAt: project.createdAt,
+      savedAt: Date.now(),
+      rowCount: rows.length,
       rules: E.rulesOf(settings),
       rows,
     };
   }
 
-  /** Save to a file. Returns true when saved, false when cancelled. */
-  async function saveProject({ saveAs = false } = {}) {
-    let result;
+  /** Project file contents (also what "Open from file" reads). */
+  function fileOf(doc) {
+    return {
+      app: PROJECT_APP,
+      type: 'project',
+      version: 2,
+      name: doc.name,
+      createdAt: new Date(doc.createdAt).toISOString(),
+      savedAt: new Date(doc.savedAt || Date.now()).toISOString(),
+      rules: doc.rules,
+      rows: doc.rows,
+    };
+  }
+
+  /**
+   * Save the current project into Projects.
+   * @param {{close?: boolean, quiet?: boolean}} opts close: new copies go to a new project afterwards
+   */
+  async function saveProject({ close = true, quiet = false } = {}) {
+    if (!rows.length && !project.savedAt) {
+      if (!quiet) toast('Nothing to save yet: copy some text first.');
+      return false;
+    }
+    const doc = projectDoc();
     try {
-      result = await saveTextFile({
-        suggestedName: safeFileName(project.name) + '.json',
-        text: JSON.stringify(projectFile(), null, 2),
-        handle: saveAs ? null : fileHandle,
-      });
+      await Library.put(doc);
     } catch (e) {
       toast('Could not save: ' + (e?.message || e));
       return false;
     }
-    if (!result) return false;
-    fileHandle = result.handle;
-    updateProject({ savedAt: Date.now(), fileName: result.fileName, dirty: false });
-    toast(result.handle ? `Saved to ${result.fileName}` : `Saved: downloaded ${result.fileName}`);
+    updateProject({ savedAt: doc.savedAt, dirty: false, closed: close });
+    if (!quiet) toast(`Saved "${project.name}" (${rows.length} row${rows.length === 1 ? '' : 's'}). The next copy starts a new project.`);
     return true;
   }
 
@@ -401,34 +434,61 @@
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
-      saveProject({ saveAs: e.shiftKey });
+      if (e.shiftKey) downloadProjectFile(projectDoc());
+      else saveProject();
     }
   });
 
+  /** Before switching projects, keep unsaved work in Projects. */
+  async function keepCurrentSafe() {
+    if (rows.length && project.dirty) return saveProject({ close: true, quiet: true });
+    return true;
+  }
+
+  /** Names like "Project Nov 2, 2026", "Project Nov 2, 2026 (2)", … */
+  async function uniqueName(base, { includeCurrent = true } = {}) {
+    const current = includeCurrent ? [project.name] : [];
+    let names = new Set(current);
+    try {
+      names = new Set([...current, ...(await Library.list()).map((p) => p.name)]);
+    } catch {
+      /* no library: fine */
+    }
+    if (!names.has(base)) return base;
+    for (let i = 2; ; i++) if (!names.has(`${base} (${i})`)) return `${base} (${i})`;
+  }
+  const defaultProjectName = () =>
+    'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
   function startNewProject(name) {
     rows = [];
-    fileHandle = null;
     safely(() => Store.setRows([], { dirty: false }));
-    project = { name, createdAt: Date.now(), savedAt: null, fileName: null, dirty: false };
+    project = { id: Store.uid(), name, createdAt: Date.now(), savedAt: null, dirty: false, closed: false };
     safely(() => Store.setProject(project));
     filter = '';
     $('search').value = '';
     renderProject();
     render();
-    toast(`Started "${name}". Copy text to fill it.`);
   }
 
-  const defaultProjectName = () =>
-    'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  // New clipboard data after a save goes into a new project.
+  let pendingName = null;
+  function ensureOpenProject() {
+    if (!project.closed) return null;
+    const previous = project.name;
+    startNewProject(pendingName || defaultProjectName());
+    // Make the name unique in the background.
+    const started = project.id;
+    uniqueName(project.name, { includeCurrent: false }).then((n) => project.id === started && n !== project.name && updateProject({ name: n }));
+    return previous;
+  }
+  uniqueName(defaultProjectName()).then((n) => (pendingName = n));
+  Store.onChange((key) => key === 'library' && uniqueName(defaultProjectName()).then((n) => (pendingName = n)));
 
-  $('newProject').addEventListener('click', () => {
-    const hasRows = rows.length > 0;
-    $('newName').value = defaultProjectName();
-    $('saveFirstWrap').hidden = !hasRows;
-    $('saveFirst').checked = hasRows && project.dirty;
-    $('saveFirstLabel').textContent = project.dirty
-      ? `Save "${project.name}" first (it has unsaved changes)`
-      : `Save "${project.name}" again first`;
+  $('newProject').addEventListener('click', async () => {
+    $('newName').value = await uniqueName(defaultProjectName());
+    $('newNote').textContent =
+      rows.length && project.dirty ? `"${project.name}" has unsaved changes. It will be saved to Projects first.` : '';
     $('newDialog').showModal();
     $('newName').select();
   });
@@ -436,13 +496,107 @@
   $('newDialog').addEventListener('close', async () => {
     if ($('newDialog').returnValue !== 'ok') return;
     const name = $('newName').value.trim() || defaultProjectName();
-    if (!$('saveFirstWrap').hidden && $('saveFirst').checked) {
-      if (!(await saveProject())) return toast('Not saved, so no new project was started.');
-    } else if (rows.length && project.dirty && !confirm(`Discard the unsaved rows of "${project.name}"?`)) {
+    if (!(await keepCurrentSafe())) return;
+    const previous = project.name;
+    const hadRows = rows.length > 0;
+    startNewProject(name);
+    toast(hadRows ? `"${previous}" is saved. Started "${name}".` : `Started "${name}"`);
+  });
+
+  /** Make a stored project the current one. */
+  async function openDoc(doc) {
+    if (doc.id === project.id && !project.dirty) {
+      $('projectsDialog').close();
       return;
     }
-    startNewProject(name);
+    if (doc.id !== project.id && !(await keepCurrentSafe())) return;
+    if (doc.rules && !E.sameRules(settings, doc.rules)) {
+      const useTheirs = confirm(
+        `"${doc.name}" was saved with different extraction rules.\n\n` +
+          `OK: use the project's rules (replaces the rules in the Admin panel)\nCancel: keep the current rules`
+      );
+      if (useTheirs) {
+        settings = E.normalizeSettings(Object.assign({}, settings, E.rulesOf(doc.rules)));
+        safely(() => Store.saveSettings(settings));
+      }
+    }
+    rows = doc.rows || [];
+    knownIds = new Set();
+    safely(() => Store.setRows(rows, { dirty: false }));
+    project = { id: doc.id, name: doc.name, createdAt: doc.createdAt, savedAt: doc.savedAt, dirty: false, closed: true };
+    safely(() => Store.setProject(project));
+    filter = '';
+    $('search').value = '';
+    renderProject();
+    render();
+    $('projectsDialog').close();
+    toast(`Opened "${doc.name}" (${rows.length} row${rows.length === 1 ? '' : 's'})`);
+  }
+
+  // ----- Projects dialog -----
+
+  async function renderProjectList() {
+    let list;
+    try {
+      list = await Library.list();
+    } catch (e) {
+      $('projectList').replaceChildren(el('p', { className: 'err', textContent: e.message || String(e) }));
+      return;
+    }
+    $('projectCount').textContent = list.length || '';
+    if (!list.length) {
+      $('projectList').replaceChildren(
+        el('p', { className: 'muted', textContent: 'No saved projects yet. Click "Save project" to keep the current table here.' })
+      );
+      return;
+    }
+    const withDoc = (id, fn) => async () => {
+      const doc = await Library.get(id);
+      if (!doc) return toast('That project no longer exists.');
+      return fn(doc);
+    };
+    $('projectList').replaceChildren(
+      ...list.map((p) => {
+        const current = p.id === project.id;
+        const meta = `${p.rowCount} row${p.rowCount === 1 ? '' : 's'} · saved ${new Date(p.savedAt).toLocaleString(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })}`;
+        return el('div', { className: 'project-item' + (current ? ' current' : '') }, [
+          el('div', { className: 'project-info' }, [
+            el('b', { textContent: p.name }),
+            current ? el('span', { className: 'tag', textContent: project.dirty ? 'open · unsaved changes' : 'open' }) : '',
+            el('div', { className: 'muted small', textContent: meta }),
+          ]),
+          el('div', { className: 'project-actions' }, [
+            el('button', { className: current ? '' : 'primary', textContent: current ? 'Open' : 'Open', disabled: current && !project.dirty, onclick: withDoc(p.id, openDoc) }),
+            el('button', { textContent: 'PDF', title: 'Download as PDF', onclick: withDoc(p.id, (d) => downloadPdf(d.name, sortedRows(d.rows))) }),
+            el('button', { textContent: 'CSV', title: 'Download as CSV (Excel)', onclick: withDoc(p.id, (d) => downloadCsv(d.name, sortedRows(d.rows))) }),
+            el('button', { textContent: 'File', title: 'Download the project file (.json)', onclick: withDoc(p.id, downloadProjectFile) }),
+            el('button', {
+              className: 'icon danger',
+              textContent: '✕',
+              title: 'Delete project',
+              onclick: async () => {
+                if (!confirm(`Delete "${p.name}" (${p.rowCount} rows) from Projects? This cannot be undone.`)) return;
+                await Library.remove(p.id);
+                if (current) updateProject({ savedAt: null, dirty: rows.length > 0, closed: false });
+                toast(`Deleted "${p.name}"`);
+              },
+            }),
+          ]),
+        ]);
+      })
+    );
+  }
+
+  $('openProjects').addEventListener('click', () => {
+    renderProjectList();
+    $('projectsDialog').showModal();
   });
+  $('closeProjects').addEventListener('click', () => $('projectsDialog').close());
+  $('projectsDialog').addEventListener('click', (e) => e.target === $('projectsDialog') && $('projectsDialog').close());
+  Store.onChange((key) => key === 'library' && renderProjectList());
 
   /** Read a project file (v1 or v2) or a "Table as JSON" download. */
   function parseProject(obj, fileName) {
@@ -485,8 +639,7 @@
     throw new Error('This is not a Clipboard Extractor project file.');
   }
 
-  $('openProject').addEventListener('click', async () => {
-    if (rows.length && project.dirty && !confirm(`"${project.name}" has unsaved changes that will be lost. Open another project anyway?`)) return;
+  $('openFromFile').addEventListener('click', async () => {
     const picked = await pickTextFile($('projectFile'));
     if (!picked) return;
     let p;
@@ -495,34 +648,63 @@
     } catch (err) {
       return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
     }
-
-    if (p.rules && !E.sameRules(settings, p.rules)) {
-      const useTheirs = confirm(
-        `"${p.name}" was saved with different extraction rules.\n\n` +
-          `OK: use the project's rules (replaces the rules in the Admin panel)\nCancel: keep the current rules`
-      );
-      if (useTheirs) {
-        settings = E.normalizeSettings(Object.assign({}, settings, E.rulesOf(p.rules)));
-        safely(() => Store.saveSettings(settings));
-      }
+    const doc = { id: Store.uid(), name: await uniqueName(p.name), createdAt: p.createdAt, savedAt: Date.now(), rowCount: p.rows.length, rules: p.rules, rows: p.rows };
+    try {
+      await Library.put(doc);
+    } catch (e) {
+      return toast('Could not add the project: ' + (e?.message || e));
     }
-    rows = p.rows;
-    fileHandle = picked.handle;
-    knownIds = new Set();
-    safely(() => Store.setRows(rows, { dirty: false }));
-    project = { name: p.name, createdAt: p.createdAt, savedAt: Date.now(), fileName: picked.name, dirty: false };
-    safely(() => Store.setProject(project));
-    renderProject();
-    render();
-    toast(`Opened "${p.name}" (${rows.length} row${rows.length === 1 ? '' : 's'})`);
+    await openDoc(doc);
   });
 
   // ---------- downloads ----------
 
-  function exportMatrix() {
-    const list = visibleRows();
+  /** Rows in capture order (oldest capture first, clipboard order within a capture). */
+  const sortedRows = (list) =>
+    list
+      .map((r, i) => [r, i])
+      .sort((a, b) => a[0].capturedAt - b[0].capturedAt || a[1] - b[1])
+      .map(([r]) => r);
+
+  function matrixOf(list) {
     const cols = columnsOf(list);
     return [['Captured', ...cols], ...list.map((r) => [new Date(r.capturedAt).toISOString(), ...cols.map((c) => r.data[c] ?? '')])];
+  }
+
+  function downloadCsv(name, list) {
+    if (!list.length) return toast('Nothing to download yet');
+    const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+    const csv = matrixOf(list)
+      .map((r) => r.map(esc).join(','))
+      .join('\r\n');
+    download(`${safeFileName(name)}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
+  }
+
+  function downloadPdf(name, list) {
+    if (!list.length) return toast('Nothing to download yet');
+    const cols = columnsOf(list);
+    const tableRows = list.map((r, i) => [String(i + 1), fmtTime(r.capturedAt), ...cols.map((c) => r.data[c] ?? '')]);
+    const pdf = window.ClipPdf.table({
+      title: name,
+      subtitle: `${list.length} row${list.length === 1 ? '' : 's'} · ${cols.length} column${cols.length === 1 ? '' : 's'} · exported ${new Date().toLocaleString()}`,
+      columns: ['#', 'Captured', ...cols],
+      rows: tableRows,
+      footer: 'Clipboard Extractor',
+    });
+    download(`${safeFileName(name)}.pdf`, 'application/pdf', pdf);
+    const missing = window.ClipPdf.unsupported(name + cols.join('') + tableRows.flat().join(''));
+    if (missing.length) {
+      toast(`Some characters (${missing.slice(0, 5).join(' ')}) can't be shown in this PDF. Use Download → Print / Save as PDF for those.`);
+    }
+  }
+
+  async function downloadProjectFile(doc) {
+    try {
+      const res = await saveTextFile({ suggestedName: safeFileName(doc.name) + '.json', text: JSON.stringify(fileOf(doc), null, 2) });
+      if (res) toast(`Project file saved: ${res.fileName}`);
+    } catch (e) {
+      toast('Could not save the file: ' + (e?.message || e));
+    }
   }
 
   const APP_FILES = [
@@ -534,6 +716,7 @@
     'js/store.js',
     'js/ui.js',
     'js/zip.js',
+    'js/pdf.js',
     'js/app.js',
     'js/admin.js',
     'icons/icon16.png',
@@ -546,6 +729,7 @@
     'package.json',
     'test/extractor.test.js',
     'test/zip.test.js',
+    'test/pdf.test.js',
   ];
   const APP_README = [
     'Clipboard Extractor',
@@ -557,15 +741,8 @@
   ].join('\n');
 
   const DOWNLOADS = {
-    csv() {
-      if (!rows.length) return toast('Nothing to download yet');
-      const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
-      const csv = exportMatrix()
-        .map((r) => r.map(esc).join(','))
-        .join('\r\n');
-      download(`${safeFileName(project.name)}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
-    },
-
+    pdf: () => downloadPdf(project.name, visibleRows()),
+    csv: () => downloadCsv(project.name, visibleRows()),
     json() {
       if (!rows.length) return toast('Nothing to download yet');
       const data = visibleRows().map((r) => {
@@ -575,9 +752,10 @@
       });
       download(`${safeFileName(project.name)}-table.json`, 'application/json', JSON.stringify(data, null, 2));
     },
-
-    saveAs() {
-      return saveProject({ saveAs: true });
+    file: () => downloadProjectFile(projectDoc()),
+    print() {
+      if (!rows.length) return toast('Nothing to print yet');
+      window.print();
     },
 
     /** The app's own files, zipped, so it can be run or hosted anywhere. */
@@ -620,7 +798,7 @@
 
   $('copyTsv').addEventListener('click', async () => {
     if (!rows.length) return toast('Nothing to copy');
-    const tsv = exportMatrix()
+    const tsv = matrixOf(visibleRows())
       .map((r) => r.map((v) => String(v).replace(/[\t\n\r]+/g, ' ')).join('\t'))
       .join('\n');
     // Mark it as seen so the watcher doesn't import our own copy.
@@ -677,8 +855,12 @@
 
   // ---------- start ----------
 
+  if (!project.id) project.id = Store.uid(); // projects from older versions
   safely(() => Store.setProject(project)); // remember the project (and its creation time) on first run
   renderProject();
+  Store.Library.list()
+    .then((l) => ($('projectCount').textContent = l.length || ''))
+    .catch(() => {});
   render();
   renderStatus();
   detectMode().then((mode) => {

@@ -26,9 +26,9 @@
       </div>
       <div class="tools">
         <div class="group" role="group" aria-label="Project">
+          <button id="openProjects" title="Your saved projects: open, download or delete">Projects <span class="badge" id="projectCount"></span></button>
           <button id="newProject" title="Start a new, empty project (keeps your extraction rules)">New project</button>
-          <button id="openProject" title="Open a saved project file">Open</button>
-          <button id="saveProject" class="primary" title="Save the project to one file (Ctrl/⌘+S)">Save</button>
+          <button id="saveProject" class="primary" title="Save this project to Projects (Ctrl/⌘+S). New copies then start a new project.">Save project</button>
         </div>
         <button id="readNow" title="Read the clipboard now, even if it was already captured">Read clipboard</button>
         <input type="search" id="search" placeholder="Filter rows…" aria-label="Filter rows" />
@@ -36,9 +36,11 @@
         <details class="menu" id="downloadMenu">
           <summary>Download ▾</summary>
           <div class="menu-list">
+            <button data-download="pdf">Table as PDF<small>Ready to print or share</small></button>
             <button data-download="csv">Table as CSV<small>Opens in Excel and Google Sheets</small></button>
             <button data-download="json">Table as JSON<small>For other programs</small></button>
-            <button data-download="saveAs">Project file (Save as…)<small>All rows and rules in one file</small></button>
+            <button data-download="file">Project file (.json)<small>All rows and rules in one file; open it again later</small></button>
+            <button data-download="print">Print / Save as PDF<small>Your browser's print dialog; supports every language</small></button>
             <button data-download="app">App source code (.zip)<small>Run your own copy of this app</small></button>
           </div>
         </details>
@@ -49,6 +51,11 @@
     </header>
 
     <main>
+      <h1 class="print-title" id="printTitle"></h1>
+      <div class="banner" id="savedBanner" hidden>
+        <span>✓ <b id="savedName"></b> is saved in Projects. The next copy will start a <b>new project</b>.</span>
+        <button class="link" id="keepAdding">Keep adding to this project instead</button>
+      </div>
       <section class="panel" id="testPanel">
         <details>
           <summary>Paste text manually</summary>
@@ -87,7 +94,7 @@
         <label class="field-col">Project name
           <input type="text" id="newName" required />
         </label>
-        <label class="check" id="saveFirstWrap"><input type="checkbox" id="saveFirst" checked /> <span id="saveFirstLabel">Save the current project first</span></label>
+        <p class="small" id="newNote"></p>
         <p class="muted small">The new project starts with an empty table and uses the same extraction rules from the Admin panel.</p>
         <div class="row end">
           <button value="cancel" formnovalidate>Cancel</button>
@@ -96,12 +103,25 @@
       </form>
     </dialog>
 
+    <dialog id="projectsDialog" class="wide">
+      <div class="dialog-head">
+        <h2>Projects</h2>
+        <div class="row">
+          <button id="openFromFile" title="Add a project file (.json) to this list and open it">Open from file…</button>
+          <button class="icon" id="closeProjects" title="Close" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <p class="muted small">Saved projects stay in this browser. Download a project as a file to keep a backup or move it to another computer.</p>
+      <div id="projectList" class="project-list"></div>
+    </dialog>
+
     <div class="toast" id="toast" role="status"></div>
 
     <script src="js/extractor.js"></script>
     <script src="js/store.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/zip.js"></script>
+    <script src="js/pdf.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

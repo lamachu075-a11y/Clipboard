@@ -264,3 +264,42 @@ pre.hl mark:not(.used) { background: transparent; box-shadow: inset 0 -2px 0 hsl
 .chip .val { overflow-wrap: anywhere; }
 .chip:not(.used) { background: transparent; border-style: dashed; color: var(--muted); }
 .chip em { font-style: normal; color: var(--muted); }
+
+/* projects */
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent-soft); color: var(--text); font-size: 11px; line-height: 18px; text-align: center; }
+.badge:empty { display: none; }
+.banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 14px; padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 10%, var(--surface));
+  border-radius: var(--radius); font-size: 14px;
+}
+dialog.wide { width: min(720px, calc(100vw - 32px)); max-height: min(80vh, 760px); }
+.dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dialog-head .row { margin: 0; }
+.project-list { display: grid; gap: 8px; margin-top: 8px; }
+.project-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px;
+}
+.project-item.current { border-color: var(--accent); }
+.project-info { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.project-info .small { width: 100%; margin: 0; }
+.project-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.project-actions button { padding: 4px 10px; }
+.print-title { display: none; }
+
+@media print {
+  @page { size: landscape; margin: 12mm; }
+  body { background: #fff; color: #000; }
+  .topbar, #testPanel, .banner, .toast, dialog, #table td.actions, #table th:last-child,
+  #table td.source, #table th.source-col { display: none !important; }
+  .print-title { display: block; font-size: 18px; margin: 0 0 4px; }
+  main { padding: 0; }
+  .table-wrap { max-height: none; overflow: visible; border: 0; }
+  #table { font-size: 10px; }
+  #table thead th { position: static; background: #eee !important; }
+  #table td, #table th { border-bottom: 1px solid #ccc; }
+  #table a { color: #000; text-decoration: none; }
+  #table td.cell:empty::before { content: ""; }
+  #table tr { break-inside: avoid; }
+}

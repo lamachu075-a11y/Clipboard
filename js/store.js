@@ -143,8 +143,65 @@
     },
   };
 
+  /*
+   * Saved projects ("Projects" list), kept in IndexedDB because they can be
+   * much larger than localStorage allows.
+   * Document: { id, name, createdAt, savedAt, rowCount, rules, rows }
+   */
+  let dbPromise = null;
+  function db() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        if (!global.indexedDB) return reject(new Error('This browser cannot store projects (IndexedDB is unavailable).'));
+        const req = indexedDB.open('clipboard-extractor', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('projects', { keyPath: 'id' });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      dbPromise.catch(() => (dbPromise = null));
+    }
+    return dbPromise;
+  }
+  async function tx(mode, fn) {
+    const conn = await db();
+    return new Promise((resolve, reject) => {
+      const t = conn.transaction('projects', mode);
+      const req = fn(t.objectStore('projects'));
+      t.oncomplete = () => resolve(req ? req.result : undefined);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error('Storage failed (the disk may be full).'));
+    });
+  }
+  const libraryChanged = () => {
+    write('libraryVersion', Date.now()); // lets other tabs know
+    emit('library');
+  };
+
+  Store.Library = {
+    /** Project summaries, newest first (without rows). */
+    async list() {
+      const all = (await tx('readonly', (s) => s.getAll())) || [];
+      return all
+        .map(({ rows, rules, ...meta }) => Object.assign(meta, { rowCount: meta.rowCount ?? (rows ? rows.length : 0) }))
+        .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+    },
+    get(id) {
+      return tx('readonly', (s) => s.get(id));
+    },
+    async put(doc) {
+      await tx('readwrite', (s) => s.put(doc));
+      libraryChanged();
+    },
+    async remove(id) {
+      await tx('readwrite', (s) => s.delete(id));
+      libraryChanged();
+    },
+  };
+
   global.addEventListener?.('storage', (e) => {
-    if (e.key && e.key.startsWith(PREFIX)) emit(e.key.slice(PREFIX.length));
+    if (!e.key || !e.key.startsWith(PREFIX)) return;
+    const key = e.key.slice(PREFIX.length);
+    emit(key === 'libraryVersion' ? 'library' : key);
   });
 
   global.ClipStore = Store;

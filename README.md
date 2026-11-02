@@ -32,17 +32,30 @@ locally or host it on GitHub Pages. Everything stays in your browser.
 - The **?** button on any table row opens that row's original text in *Test & explain*.
 
 ### Projects
-- Give the project a name (top left). The label next to it shows whether there are unsaved changes.
-- **Save** (Ctrl/⌘ + S) writes the whole project (all rows plus the rules used) into **one `.json` file**.
-  In Chrome and Edge you pick the file once and later saves update that same file. Other browsers download the file instead.
-- **New project** starts an empty table with the same rules. If the current project has unsaved
-  changes, it offers to save it first.
-- **Open** loads a saved project. If the file was made with different rules, you choose whether to use them.
+- Give the project a name (top left). The label next to it shows **● Unsaved** or **✓ Saved**.
+- **Save project** (Ctrl/⌘ + S) stores the project (all rows plus the rules used) in the **Projects** list,
+  inside the browser. No file dialog is needed.
+- **After a project is saved, the next clipboard extraction automatically starts a new project**, so a
+  saved project is never changed by new data. To add more to the saved project, click
+  *Keep adding to this project instead* in the green banner.
+- **Projects** lists every saved project. For each one you can **Open**, download it as a **PDF**, **CSV**
+  or project **File** (`.json`), or delete it. *Open from file…* adds a downloaded project file back to the list.
+- **New project** starts an empty table with the same rules. Unsaved work is saved to Projects first,
+  so switching projects never loses data.
 
 ### Table and downloads
 - Sort, filter, double-click a cell to edit, delete rows. Rows from the same copy are shaded as a group.
-- **Download** menu: table as CSV (Excel) or JSON, *Save as…*, or the **app source code (.zip)**.
+- **Download** menu:
+  - **Table as PDF**: a PDF file, landscape, with the project name, page numbers and a header row repeated on every page.
+  - **Table as CSV** (Excel) or **JSON**.
+  - **Project file (.json)**: the whole project in one file, for backups or another computer.
+  - **Print / Save as PDF**: the browser's print dialog, with a clean print layout.
+  - **App source code (.zip)**.
 - **Copy** puts the table on the clipboard as tab-separated text for Excel / Google Sheets.
+
+> The built-in PDF uses the standard PDF fonts, which cover Latin-script languages (English, Spanish,
+> French, German, …). For other scripts such as Chinese, Arabic or Hindi, the app shows a hint to use
+> *Print / Save as PDF*, which supports every language.
 
 ## Browser support for automatic reading
 
@@ -91,8 +104,9 @@ Turn it on once under **Settings → Pages → Build and deployment → Source: 
 | `index.html`, `js/app.js` | the table page: clipboard watcher, projects, downloads |
 | `admin.html`, `js/admin.js` | the admin panel: rules editor, test & explain |
 | `js/extractor.js` | extraction engine with `extract()` and `explain()` (pure JS, no DOM, unit tested) |
-| `js/store.js` | browser storage (`localStorage`), cross-tab change events |
+| `js/store.js` | browser storage: current project (`localStorage`), saved Projects (IndexedDB), cross-tab change events |
 | `js/ui.js` | shared helpers: toasts, downloads, saving and opening files |
 | `js/zip.js` | small dependency-free ZIP writer used for "App source code" |
+| `js/pdf.js` | small dependency-free PDF writer used for "Table as PDF" |
 | `css/app.css` | styles (light and dark) |
 | `test/` | `npm test`: unit tests (Node 18+) |
