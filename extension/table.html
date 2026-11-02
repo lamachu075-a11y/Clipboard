@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clipboard Table</title>
+    <link rel="icon" href="icons/icon32.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="table.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="icons/icon32.png" alt="" width="24" height="24" />
+        <h1>Clipboard Extractor</h1>
+        <label class="switch" title="Watch the clipboard"><input type="checkbox" id="enabled" /><span id="enabledLabel">Watching</span></label>
+      </div>
+      <div class="tools">
+        <input type="search" id="search" placeholder="Filter rows…" />
+        <button id="copyTsv" title="Copy the visible rows as tab-separated text (paste into Excel/Sheets)">Copy</button>
+        <button id="exportCsv">Export CSV</button>
+        <button id="exportJson">Export JSON</button>
+        <button id="clear" class="danger">Clear</button>
+        <button id="toggleSettings" aria-expanded="false">Settings</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" id="testPanel">
+        <details>
+          <summary>Paste text manually</summary>
+          <p class="muted">Paste or type any text to preview what will be extracted. Uses your current settings.</p>
+          <textarea id="testInput" rows="6" placeholder="e.g.&#10;Name: Jane Doe&#10;Email: jane@example.com&#10;Phone: +1 555 123 4567"></textarea>
+          <div class="row">
+            <button class="primary" id="testAdd">Add to table</button>
+            <span class="muted" id="testInfo"></span>
+          </div>
+          <div class="preview" id="testPreview"></div>
+        </details>
+      </section>
+
+      <div class="summary muted" id="summary"></div>
+      <div class="table-wrap">
+        <table id="table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="empty">
+          <h2>No data yet</h2>
+          <p>Copy some text anywhere (Ctrl/⌘ + C). Emails, phone numbers, URLs, dates, amounts,
+          <code>Key: Value</code> lines and your custom fields are extracted into this table automatically.</p>
+          <p class="muted">Tip: one copy can create many rows: every contact in a list, every line of a spreadsheet.</p>
+        </div>
+      </div>
+    </main>
+
+    <aside class="drawer" id="settings" hidden>
+      <div class="drawer-head">
+        <h2>Settings</h2>
+        <button class="icon" id="closeSettings" title="Close">✕</button>
+      </div>
+
+      <h3>Fields to extract</h3>
+      <p class="muted small">"Required" keeps only rows that contain that field.</p>
+      <table class="fields" id="builtinFields">
+        <thead><tr><th>Field</th><th>Extract</th><th>Required</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h3>Custom fields (regex)</h3>
+      <p class="muted small">Name the column and give a regular expression. Use a capture group number to keep only part of the match, e.g. <code>Order #(\d+)</code> with group 1.</p>
+      <div id="customFields"></div>
+      <button id="addCustom">+ Add custom field</button>
+
+      <h3>Splitting one clipboard into rows</h3>
+      <label class="field">Split records by
+        <select id="splitMode">
+          <option value="auto">Auto-detect</option>
+          <option value="whole">Whole clipboard is one record</option>
+          <option value="line">Each line</option>
+          <option value="blank">Blank lines (paragraphs)</option>
+          <option value="custom">Custom delimiter</option>
+        </select>
+      </label>
+      <label class="field" id="delimiterWrap">Delimiter <input type="text" id="delimiter" placeholder="---  (\n = newline, \t = tab)" /></label>
+      <label class="field">Multiple matches in a record
+        <select id="matchMode">
+          <option value="zip">One row per match</option>
+          <option value="join">Join into one cell</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="repeatSingles" /> Repeat single values on every row of a record</label>
+      <label class="check"><input type="checkbox" id="detectTables" /> Spreadsheet copies (tab-separated) become rows</label>
+
+      <h3>Capture</h3>
+      <label class="check"><input type="checkbox" id="dedupeRows" /> Skip rows already in the table</label>
+      <label class="check"><input type="checkbox" id="keepSource" /> Keep original clipboard text</label>
+      <label class="field">Check clipboard every <span><input type="number" id="pollInterval" min="250" step="250" /> ms</span></label>
+      <label class="field">Ignore text shorter than <span><input type="number" id="minLength" min="0" /> chars</span></label>
+
+      <div class="row">
+        <button id="resetSettings" class="danger">Reset to defaults</button>
+        <span class="muted small" id="savedMsg"></span>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script src="lib/extractor.js"></script>
+    <script src="lib/storage.js"></script>
+    <script src="table.js"></script>
+  </body>
+</html>
