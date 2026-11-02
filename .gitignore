@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+public/clipboard-extractor-source.zip
+*.zip
+.DS_Store
+next-env.d.ts
+*.tsbuildinfo
