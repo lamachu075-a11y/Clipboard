@@ -5,31 +5,44 @@ and **collects it in a table**. One copy can produce **many rows**: every contac
 every line of a spreadsheet, every email in a paragraph.
 
 It's a static site (HTML, CSS and JavaScript, no build step, no server code), so you can open it
-locally or host it on GitHub Pages. Everything stays in your browser (`localStorage`).
+locally or host it on GitHub Pages. Everything stays in your browser.
 
 ## Features
 
+### Capture and extract
 - **Automatic clipboard reading.** Copy text anywhere, switch back to the app's tab, and the new
-  data is already in the table. While the tab is open and focused it also checks the clipboard every second.
+  data is already in the table. While the tab is focused it also checks the clipboard every second.
 - **Ctrl/⌘ + V anywhere on the page** adds whatever you paste. This works in every browser.
-- **Built-in extractors:** Email, Phone, URL, Date, Amount/Currency, IP address, Hashtag.
-- **`Key: Value` lines** (e.g. `Name: Jane Doe`, `Company = Acme`) become their own columns.
-- **Custom fields:** your own column from a regular expression, with an optional capture group
-  (e.g. `Order #(\d+)` with group `1`).
-- **Required fields:** keep only rows that contain e.g. an Email.
-- **Multiple rows from one clipboard:**
-  - Spreadsheet copies (tab-separated) map 1:1 to rows, using the header row as column names.
-  - Blank-line separated blocks, one record per line, or a custom delimiter.
-  - Several matches in one record become one row per match, or are joined into one cell.
-- **Table:** sort by any column, filter, double-click a cell to edit, delete rows. Rows from the
-  same copy are shaded as a group. Open tabs stay in sync.
-- **Download menu:**
-  - **Table as CSV** (opens in Excel and Google Sheets) or **Table as JSON**.
-  - **Project file:** all rows and settings in one `.json` file. Use **Open project** to load it again,
-    on this or another computer. You can replace the current table or add to it. A *Table as JSON* download can be opened too.
-  - **App source code (.zip):** the app's own files, ready to run or host anywhere.
-- **Copy** puts the table on the clipboard as tab-separated text, ready to paste into Excel or Google Sheets.
-- **Installable** as an app (PWA manifest): use "Install app" in Chrome or Edge, or "Add to Home Screen".
+- **Built-in rules:** Email, Phone, URL, Date, Amount/Currency, IP address, Hashtag, and
+  `Key: Value` lines (e.g. `Name: Jane Doe` becomes a *Name* column).
+- **Custom rules:** any regular expression becomes a column.
+- **Multiple rows from one clipboard:** spreadsheet copies, blank-line separated blocks, one record
+  per line, or a custom delimiter. Several values in one record become one row each, or one joined cell.
+
+### Admin panel (`admin.html`)
+- Every extraction rule in one place, **with its regular expression**. Built-in patterns can be
+  edited, renamed or reset. Custom rules can be added, re-ordered and deleted. Any rule can be marked *required*.
+- Rules are **saved automatically** in the browser and used by the table immediately.
+- **Test & explain** shows, step by step, how a text is extracted:
+  1. how it is split into records, and why;
+  2. which part of the text each rule matched (colour-highlighted), and what was skipped or rejected and why;
+  3. the rows that come out.
+- Each rule shows how many values it finds in the test text.
+- **Export / import rules** as a file, or reset everything to the defaults.
+- The **?** button on any table row opens that row's original text in *Test & explain*.
+
+### Projects
+- Give the project a name (top left). The label next to it shows whether there are unsaved changes.
+- **Save** (Ctrl/⌘ + S) writes the whole project (all rows plus the rules used) into **one `.json` file**.
+  In Chrome and Edge you pick the file once and later saves update that same file. Other browsers download the file instead.
+- **New project** starts an empty table with the same rules. If the current project has unsaved
+  changes, it offers to save it first.
+- **Open** loads a saved project. If the file was made with different rules, you choose whether to use them.
+
+### Table and downloads
+- Sort, filter, double-click a cell to edit, delete rows. Rows from the same copy are shaded as a group.
+- **Download** menu: table as CSV (Excel) or JSON, *Save as…*, or the **app source code (.zip)**.
+- **Copy** puts the table on the clipboard as tab-separated text for Excel / Google Sheets.
 
 ## Browser support for automatic reading
 
@@ -40,8 +53,6 @@ Browsers only let a web page read the clipboard **while its tab is focused**, an
 | --- | --- |
 | Chrome, Edge, Brave, Opera | Click **Allow clipboard access** once. After that, reading is automatic. |
 | Firefox, Safari | They ask for confirmation on every read, so the app uses **Ctrl/⌘ + V** on the page instead. |
-
-The status next to the title shows which mode is active.
 
 ## Run it
 
@@ -58,30 +69,30 @@ reading is only guaranteed on `localhost` or `https`.
 The workflow in `.github/workflows/pages.yml` tests and deploys the site on every push to `main`.
 Turn it on once under **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
-## Try it
+## Project file format
 
-Copy this text, then click back into the app:
-
+```json
+{
+  "app": "clipboard-extractor",
+  "type": "project",
+  "version": 2,
+  "name": "Leads October",
+  "createdAt": "2026-11-02T06:00:00.000Z",
+  "savedAt": "2026-11-02T07:30:00.000Z",
+  "rules": { "splitMode": "auto", "fields": { "...": "..." }, "customFields": [] },
+  "rows": [{ "id": "…", "capturedAt": 1793600000000, "data": { "Name": "John", "Email": "john@acme.com" }, "cols": ["Name", "Email"], "source": "…" }]
+}
 ```
-Name: John Smith
-Email: john@acme.com
-Phone: +91 98765 43210
-
-Name: Jane Doe
-Email: jane@globex.io
-Phone: 020 7946 0958
-```
-
-Two rows (Name, Email, Phone) appear.
 
 ## Project layout
 
 | Path | What it is |
 | --- | --- |
-| `index.html` | the app page |
-| `js/extractor.js` | extraction engine (pure JS, no DOM, unit tested) |
-| `js/store.js` | `localStorage` persistence, cross-tab change events |
-| `js/app.js` | clipboard watcher, table, downloads, open project, settings |
+| `index.html`, `js/app.js` | the table page: clipboard watcher, projects, downloads |
+| `admin.html`, `js/admin.js` | the admin panel: rules editor, test & explain |
+| `js/extractor.js` | extraction engine with `extract()` and `explain()` (pure JS, no DOM, unit tested) |
+| `js/store.js` | browser storage (`localStorage`), cross-tab change events |
+| `js/ui.js` | shared helpers: toasts, downloads, saving and opening files |
 | `js/zip.js` | small dependency-free ZIP writer used for "App source code" |
 | `css/app.css` | styles (light and dark) |
-| `test/` | `npm test`: unit tests for the extractor and ZIP writer (Node 18+) |
+| `test/` | `npm test`: unit tests (Node 18+) |
