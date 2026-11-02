@@ -284,7 +284,16 @@
     for (const id of ['splitMode', 'matchMode', 'delimiter', 'pollInterval', 'minLength']) $(id).value = settings[id];
     for (const id of ['repeatSingles', 'detectTables', 'dedupeRows', 'keepSource']) $(id).checked = settings[id];
     $('delimiterWrap').hidden = settings.splitMode !== 'custom';
+    $('enabled').checked = settings.enabled;
+    $('enabledState').textContent = settings.enabled ? 'ON' : 'OFF';
+    $('enabledState').closest('.autoread').classList.toggle('on', settings.enabled);
   }
+  $('enabled').addEventListener('change', () => {
+    settings.enabled = $('enabled').checked;
+    renderOptions();
+    save();
+    toast(settings.enabled ? 'Auto-read is ON' : 'Auto-read is OFF');
+  });
   for (const id of ['splitMode', 'matchMode', 'delimiter']) {
     $(id).addEventListener('input', () => {
       settings[id] = $(id).value;
@@ -467,6 +476,128 @@
     save();
     toast('Rules reset to defaults');
   });
+
+  // ---------- regex templates ----------
+
+  const T = window.ClipTemplates;
+  let tplCategory = 'All';
+
+  /** Settings that run only one rule (to preview a template on its example). */
+  const onlyRule = (rule) => ({
+    splitMode: 'whole',
+    fields: Object.fromEntries(Object.keys(E.DEFAULT_SETTINGS.fields).map((k) => [k, { enabled: false }])),
+    customFields: [Object.assign({ id: 'preview', enabled: true }, rule)],
+  });
+
+  /** A column name not used by another custom rule ("Order", "Order 2", …). */
+  function freeColumnName(name) {
+    const used = new Set(settings.customFields.map((c) => String(c.name || '').trim().toLowerCase()));
+    if (!used.has(name.toLowerCase())) return name;
+    for (let i = 2; ; i++) if (!used.has(`${name} ${i}`.toLowerCase())) return `${name} ${i}`;
+  }
+
+  function templateCard(t) {
+    const values = T.defaults(t);
+    const regexEl = el('code', { className: 'tpl-regex' });
+    const preview = el('div', { className: 'tpl-preview' });
+
+    function refresh() {
+      const rule = T.resolve(t, values);
+      regexEl.textContent = `/${rule.pattern}/${rule.flags}${rule.group ? `   · keeps group ${rule.group}` : ''}`;
+      const r = E.explain(T.exampleOf(t, values), onlyRule(rule));
+      const rec = r.records[0];
+      const found = r.rows.map((row) => row[rule.name]).filter(Boolean);
+      preview.replaceChildren(
+        el('span', { className: 'muted small', textContent: 'Example' }),
+        rec ? highlight(rec.text, rec.offset, rec.matches) : el('pre', { className: 'hl', textContent: t.example }),
+        el('div', { className: 'tpl-result' }, [
+          el('span', { className: 'muted small', textContent: `Extracts into "${rule.name}": ` }),
+          ...(found.length
+            ? found.map((v) => el('span', { className: 'chip used', textContent: v }))
+            : [el('span', { className: 'muted small', textContent: 'nothing in this example' })]),
+        ])
+      );
+      preview.querySelectorAll('mark').forEach((m) => m.style.setProperty('--h', 140));
+    }
+
+    const params = (t.params || []).map((p) => {
+      const input = el('input', { type: 'text', value: values[p.key], spellcheck: false });
+      input.setAttribute('aria-label', p.label);
+      input.addEventListener('input', () => {
+        values[p.key] = input.value;
+        refresh();
+      });
+      return el('label', { className: 'tpl-param' }, [p.label + ' ', input]);
+    });
+
+    const add = el('button', {
+      className: 'primary',
+      textContent: 'Add rule',
+      onclick: () => {
+        const rule = T.resolve(t, values);
+        if ((t.params || []).some((p) => !String(values[p.key] || '').trim())) return toast('Fill in the template first.');
+        const name = freeColumnName(rule.name);
+        settings.customFields.push({ id: Store.uid(), name, pattern: rule.pattern, flags: rule.flags, group: rule.group, enabled: true, required: false, template: t.id });
+        $('templatesDialog').close();
+        renderRules();
+        save();
+        const card = $('rules').querySelector(`[data-rule="custom:${settings.customFields.at(-1).id}"]`);
+        card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        card?.classList.add('flash');
+        toast(`Added the "${name}" rule. Paste a sample into Test & explain to check it.`);
+      },
+    });
+
+    refresh();
+    return el('div', { className: 'tpl' }, [
+      el('div', { className: 'tpl-head' }, [el('b', { textContent: t.name }), el('span', { className: 'tag', textContent: t.category }), add]),
+      el('p', { className: 'desc', textContent: t.description }),
+      ...(params.length ? [el('div', { className: 'tpl-params' }, params)] : []),
+      regexEl,
+      preview,
+    ]);
+  }
+
+  function renderTemplates() {
+    const q = $('templateSearch').value.trim().toLowerCase();
+    const list = T.TEMPLATES.filter(
+      (t) =>
+        (tplCategory === 'All' || t.category === tplCategory) &&
+        (!q || [t.name, t.category, t.description, t.example].join(' ').toLowerCase().includes(q))
+    );
+    $('templateList').replaceChildren(
+      ...(list.length ? list.map(templateCard) : [el('p', { className: 'muted', textContent: 'No template matches. Try "Text after a label", which works for almost any labeled value.' })])
+    );
+    const cats = ['All', ...new Set(T.TEMPLATES.map((t) => t.category))];
+    $('templateCats').replaceChildren(
+      ...cats.map((c) =>
+        el('button', {
+          className: 'chip-btn' + (c === tplCategory ? ' active' : ''),
+          textContent: c,
+          onclick: () => {
+            tplCategory = c;
+            renderTemplates();
+          },
+        })
+      )
+    );
+  }
+
+  $('addTemplate').addEventListener('click', () => {
+    $('templateSearch').value = '';
+    tplCategory = 'All';
+    renderTemplates();
+    $('templatesDialog').showModal();
+    $('templateList').scrollTop = 0;
+    $('templateSearch').focus();
+  });
+  $('templateSearch').addEventListener('input', renderTemplates);
+  $('closeTemplates').addEventListener('click', () => $('templatesDialog').close());
+  $('templatesDialog').addEventListener('click', (e) => e.target === $('templatesDialog') && $('templatesDialog').close());
+
+  $('cheatsheet').replaceChildren(
+    ...T.CHEATSHEET.map(([token, meaning]) => el('tr', {}, [el('td', {}, [el('code', { textContent: token })]), el('td', { textContent: meaning })]))
+  );
 
   // ---------- start ----------
 

@@ -247,7 +247,11 @@
       const m = KV_LINE.exec(line);
       if (m) {
         const key = m[1].trim();
-        const ok = !KV_SKIP_KEYS.test(key) && key.split(/\s+/).length <= 5 && !/^\/\//.test(m[2]);
+        const ok =
+          !KV_SKIP_KEYS.test(key) &&
+          key.split(/\s+/).length <= 5 &&
+          !/^\/\//.test(m[2]) && // "scheme://"
+          !(/\d$/.test(key) && /^\d/.test(m[2])); // a time like "at 9:30", not a label
         if (ok) {
           const end = pos + line.replace(/\s+$/, '').length;
           pairs.push({ key: titleCase(key), value: m[2], start: end - m[2].length, end });
@@ -295,7 +299,8 @@
       arr.push(m.value);
       m.status = 'used';
     };
-    const builtinLabels = new Map(rules.filter((r) => r.type === 'builtin').map((r) => [r.label.toLowerCase(), r.label]));
+    // "Email: x" is left to the Email rule; "Bill to: x" to a custom "Bill to" rule.
+    const builtinLabels = new Map(rules.filter((r) => r.type !== 'kv').map((r) => [r.label.toLowerCase(), r.label]));
 
     for (const rule of rules) {
       if (rule.type === 'kv') {

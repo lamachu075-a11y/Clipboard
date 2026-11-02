@@ -43,9 +43,16 @@
           <section class="card">
             <div class="card-head">
               <h2>Extraction rules</h2>
-              <button id="addRule" class="primary">+ Add rule</button>
+              <div class="row">
+                <button id="addTemplate" class="primary" title="Pick a ready-made regex">Add from template</button>
+                <button id="addRule" title="Write your own regex">+ Blank rule</button>
+              </div>
             </div>
             <p class="muted small">Each rule is a <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions" target="_blank" rel="noopener noreferrer">regular expression</a>. The count shows how many values it finds in the test text. Use a capture group to keep only part of a match, e.g. <code>Order #(\d+)</code> with group 1 keeps just the number.</p>
+            <details class="cheats">
+              <summary>Regex quick reference</summary>
+              <table id="cheatsheet"></table>
+            </details>
             <div id="rules" class="rules"></div>
           </section>
 
@@ -73,6 +80,12 @@
 
           <section class="card">
             <h2>Capture</h2>
+            <label class="autoread" title="When ON, new clipboard text is read and extracted automatically">
+              <input type="checkbox" id="enabled" role="switch" />
+              <span class="autoread-label">Auto-read clipboard</span>
+              <span class="autoread-state" id="enabledState">OFF</span>
+            </label>
+            <p class="muted small">When ON, the table page reads new clipboard text automatically whenever you switch to it. When OFF, nothing is read until you press Ctrl/⌘+V on the page or click "Read clipboard".</p>
             <label class="check"><input type="checkbox" id="dedupeRows" /> Skip rows already in the table</label>
             <label class="check"><input type="checkbox" id="keepSource" /> Keep the original text with each row</label>
             <label class="field">Check the clipboard every <span><input type="number" id="pollInterval" min="250" step="250" /> ms</span></label>
@@ -93,11 +106,25 @@
       </div>
     </main>
 
+    <dialog id="templatesDialog" class="wide">
+      <div class="dialog-head">
+        <h2>Regex templates</h2>
+        <button class="icon" id="closeTemplates" title="Close" aria-label="Close">✕</button>
+      </div>
+      <p class="muted small">Pick a template to add it as a custom rule. Fill-in templates let you type your own label. The example shows exactly what the rule extracts, and you can edit the rule afterwards.</p>
+      <div class="tpl-filter">
+        <input type="search" id="templateSearch" placeholder="Search templates, e.g. invoice, time, postcode…" aria-label="Search templates" />
+        <div class="samples" id="templateCats"></div>
+      </div>
+      <div id="templateList" class="tpl-list"></div>
+    </dialog>
+
     <div class="toast" id="toast" role="status"></div>
 
     <script src="js/extractor.js"></script>
     <script src="js/store.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/templates.js"></script>
     <script src="js/admin.js"></script>
   </body>
 </html>

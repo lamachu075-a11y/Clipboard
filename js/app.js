@@ -78,18 +78,19 @@
     const { mode } = Watcher;
     let text;
     let kind;
-    if (mode === 'paste') [text, kind] = ['Press Ctrl/⌘+V here to add', 'warn'];
+    if (!on) [text, kind] = ['Off: copies are not read automatically (Ctrl/⌘+V still works)', 'off'];
+    else if (mode === 'auto') [text, kind] = [document.hasFocus() ? 'Watching clipboard' : 'Watching: switch back to this tab after copying', 'ok'];
+    else if (mode === 'prompt') [text, kind] = ['Allow clipboard access to start', 'warn'];
     else if (mode === 'denied') [text, kind] = ['Clipboard blocked in site settings: press Ctrl/⌘+V instead', 'error'];
-    else if (mode === 'prompt') [text, kind] = ['Needs permission', 'warn'];
-    else if (mode === 'checking') [text, kind] = ['Starting…', 'warn'];
-    else if (!on) [text, kind] = ['Paused', 'off'];
-    else [text, kind] = [document.hasFocus() ? 'Watching clipboard' : 'Watching: switch back to this tab after copying', 'ok'];
+    else if (mode === 'paste') [text, kind] = ["This browser doesn't allow automatic reading: press Ctrl/⌘+V here", 'warn'];
+    else [text, kind] = ['Starting…', 'warn'];
     $('status').dataset.kind = kind;
     $('statusText').textContent = text;
-    $('allow').hidden = mode !== 'prompt';
-    $('enabled').closest('.switch').hidden = mode === 'paste' || mode === 'denied';
+    $('allow').hidden = !(on && mode === 'prompt');
     $('readNow').hidden = mode !== 'auto';
     $('enabled').checked = on;
+    $('enabledState').textContent = on ? 'ON' : 'OFF';
+    $('enabledState').closest('.autoread').classList.toggle('on', on);
   }
 
   /** Read the clipboard. `manual`: user-initiated, process even if unchanged. */
@@ -177,6 +178,12 @@
     settings.enabled = $('enabled').checked;
     safely(() => Store.saveSettings(settings));
     renderStatus();
+    if (!settings.enabled) return toast('Auto-read is OFF. Copies are not read until you turn it back on.');
+    if (Watcher.mode === 'prompt') return readClipboard(true); // this click lets the browser ask for permission
+    if (Watcher.mode === 'paste' || Watcher.mode === 'denied') {
+      return toast("This browser doesn't let web pages read the clipboard automatically. Press Ctrl/⌘+V on this page instead.");
+    }
+    toast('Auto-read is ON. Copy text anywhere, then come back to this tab.');
     readClipboard();
   });
 
@@ -717,6 +724,7 @@
     'js/ui.js',
     'js/zip.js',
     'js/pdf.js',
+    'js/templates.js',
     'js/app.js',
     'js/admin.js',
     'icons/icon16.png',
@@ -730,6 +738,7 @@
     'test/extractor.test.js',
     'test/zip.test.js',
     'test/pdf.test.js',
+    'test/templates.test.js',
   ];
   const APP_README = [
     'Clipboard Extractor',

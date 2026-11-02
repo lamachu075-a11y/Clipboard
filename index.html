@@ -20,7 +20,11 @@
           <input type="text" id="projectName" aria-label="Project name" spellcheck="false" />
           <span class="save-state" id="saveState"></span>
         </div>
-        <label class="switch" title="Automatically read the clipboard"><input type="checkbox" id="enabled" /><span>Auto-read</span></label>
+        <label class="autoread" title="When ON, new clipboard text is read and extracted automatically">
+          <input type="checkbox" id="enabled" role="switch" aria-describedby="statusText" />
+          <span class="autoread-label">Auto-read clipboard</span>
+          <span class="autoread-state" id="enabledState">OFF</span>
+        </label>
         <span class="status" id="status" role="status"><span class="dot"></span><span id="statusText">Starting…</span></span>
         <button class="primary" id="allow" hidden>Allow clipboard access</button>
       </div>

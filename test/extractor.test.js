@@ -151,3 +151,14 @@ test('sameRules ignores non-rule settings', () => {
   assert.ok(E.sameRules({ enabled: false, pollInterval: 5000 }, {}));
   assert.ok(!E.sameRules({ matchMode: 'join' }, {}));
 });
+
+test('times are not mistaken for "Key: Value" labels', () => {
+  assert.deepEqual(E.extract('Meeting at 9:30 AM\nRoom: B12'), [{ Room: 'B12' }]);
+});
+
+test('"Label: value" lines defer to a custom rule with the same name', () => {
+  const rows = E.extract('Bill to: Acme Corp', {
+    customFields: [{ id: '1', name: 'Bill to', pattern: 'Bill\\s+to\\s*:\\s*([^\\n]+)', flags: 'i', group: 1 }],
+  });
+  assert.deepEqual(rows, [{ 'Bill to': 'Acme Corp' }]);
+});
