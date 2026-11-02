@@ -65,6 +65,17 @@ locally or host it on GitHub Pages. Everything stays in your browser.
 > French, German, …). For other scripts such as Chinese, Arabic or Hindi, the app shows a hint to use
 > *Print / Save as PDF*, which supports every language.
 
+### Phone layout
+On screens up to 700px wide the app switches to a phone layout:
+- a **bottom bar** with a big **Paste** button (reads the clipboard in one tap; if the browser doesn't
+  allow it, it opens a box to long-press and paste into), plus **Projects**, **Save** and **More**;
+- **More** opens a bottom sheet with New project, downloads (PDF, CSV, project file), Print, Copy, Clear and the Admin panel;
+- rows are shown as **cards** (label: value) instead of a wide table;
+- dialogs open as **bottom sheets**, and hints say "tap Paste" instead of "press Ctrl+V";
+- the admin panel gets **Rules / Test & explain / Settings** tabs.
+
+Add it to the home screen (browser menu → *Add to Home Screen* / *Install app*) to use it like an app.
+
 ## Browser support for automatic reading
 
 Browsers only let a web page read the clipboard **while its tab is focused**, and only on

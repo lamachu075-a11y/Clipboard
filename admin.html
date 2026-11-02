@@ -25,10 +25,16 @@
       <input type="file" id="rulesFile" accept=".json,application/json" hidden />
     </header>
 
-    <main class="admin">
+    <nav class="admin-tabs" role="tablist" aria-label="Admin sections">
+      <button role="tab" data-tab="rules" aria-selected="true">Rules</button>
+      <button role="tab" data-tab="test" aria-selected="false">Test &amp; explain</button>
+      <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+
+    <main class="admin" data-active="rules">
       <div class="admin-grid">
         <div class="admin-col">
-          <section class="card">
+          <section class="card" data-tab="rules">
             <h2>How text is extracted</h2>
             <ol class="how">
               <li><b>Spreadsheet check.</b> If every line has the same number of tabs (a copy from Excel or Sheets), each line becomes a row and the rules below are not used.</li>
@@ -40,7 +46,7 @@
             <p class="muted small">All rules are saved automatically in this browser and used by the table right away. Every saved project file also contains a copy of the rules it was made with.</p>
           </section>
 
-          <section class="card">
+          <section class="card" data-tab="rules">
             <div class="card-head">
               <h2>Extraction rules</h2>
               <div class="row">
@@ -56,7 +62,7 @@
             <div id="rules" class="rules"></div>
           </section>
 
-          <section class="card" id="records">
+          <section class="card" data-tab="settings" id="records">
             <h2>Records &amp; rows</h2>
             <label class="field">Split records by
               <select id="splitMode">
@@ -78,7 +84,7 @@
             <label class="check"><input type="checkbox" id="detectTables" /> Spreadsheet copies (tab-separated) become rows</label>
           </section>
 
-          <section class="card">
+          <section class="card" data-tab="settings">
             <h2>Capture</h2>
             <label class="autoread" title="When ON, new clipboard text is read and extracted automatically">
               <input type="checkbox" id="enabled" role="switch" />
@@ -94,7 +100,7 @@
         </div>
 
         <div class="admin-col sticky" id="test">
-          <section class="card">
+          <section class="card" data-tab="test">
             <div class="card-head">
               <h2>Test &amp; explain</h2>
               <div class="samples" id="samples"></div>

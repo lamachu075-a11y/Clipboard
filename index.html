@@ -82,11 +82,13 @@
         </table>
         <div class="empty" id="empty">
           <h2>No data yet</h2>
-          <p>Copy some text anywhere (Ctrl/⌘ + C), then come back to this tab. The clipboard is read
+          <p class="mouse-only">Copy some text anywhere (Ctrl/⌘ + C), then come back to this tab. The clipboard is read
           automatically, and emails, phone numbers, URLs, dates, amounts, <code>Key: Value</code> lines
           and your custom rules land in this table.</p>
-          <p>You can also press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd> anywhere on this page.</p>
-          <p class="muted">When you're done, <b>Save</b> keeps everything in one project file, and <b>New project</b> starts a fresh table with the same rules.
+          <p class="mouse-only">You can also press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd> anywhere on this page.</p>
+          <p class="touch-only">Copy text in any app, come back here and tap <b>Paste</b>. Emails, phone numbers, links,
+          dates, amounts, <code>Key: Value</code> lines and your custom rules are pulled out into cards.</p>
+          <p class="muted"><b>Save project</b> keeps it in Projects, and the next copy starts a new project.
           The <a href="admin.html">Admin panel</a> shows and edits the rules used for extraction.</p>
         </div>
       </div>
@@ -117,6 +119,32 @@
       </div>
       <p class="muted small">Saved projects stay in this browser. Download a project as a file to keep a backup or move it to another computer.</p>
       <div id="projectList" class="project-list"></div>
+    </dialog>
+
+    <!-- Phone layout: bottom action bar + "More" sheet (hidden on larger screens) -->
+    <nav class="mobile-bar" aria-label="Actions">
+      <button id="mProjects"><span class="mi">▤</span>Projects</button>
+      <button id="mPaste" class="primary paste"><span class="mi">⧉</span>Paste</button>
+      <button id="mSave"><span class="mi">✓</span>Save</button>
+      <button id="mMore"><span class="mi">⋯</span>More</button>
+    </nav>
+
+    <dialog id="moreSheet" class="sheet">
+      <div class="sheet-grip"></div>
+      <div class="sheet-list" id="moreList">
+        <button data-proxy="#newProject"><span class="mi">＋</span>New project</button>
+        <button data-proxy="#readNow" class="needs-auto"><span class="mi">↻</span>Read clipboard again</button>
+        <button data-proxy="[data-download=pdf]"><span class="mi">⇩</span>Download PDF</button>
+        <button data-proxy="[data-download=csv]"><span class="mi">⇩</span>Download CSV (Excel)</button>
+        <button data-proxy="[data-download=file]"><span class="mi">⇩</span>Download project file</button>
+        <button data-proxy="[data-download=print]"><span class="mi">⎙</span>Print / Save as PDF</button>
+        <button data-proxy="#copyTsv"><span class="mi">⧉</span>Copy table</button>
+        <button data-proxy="#testPanel summary"><span class="mi">✎</span>Type or paste text</button>
+        <a href="admin.html"><span class="mi">⚙</span>Admin panel: extraction rules</a>
+        <button data-proxy="[data-download=app]"><span class="mi">⇩</span>App source code (.zip)</button>
+        <button data-proxy="#clear" class="danger"><span class="mi">✕</span>Clear table</button>
+      </div>
+      <button class="sheet-close" id="moreClose">Close</button>
     </dialog>
 
     <div class="toast" id="toast" role="status"></div>

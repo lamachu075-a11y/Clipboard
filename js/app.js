@@ -73,21 +73,26 @@
     if (mode === 'auto') readClipboard();
   }
 
+  /** Phones and tablets have no Ctrl+V: point them to the Paste button instead. */
+  const isTouch = () => window.matchMedia('(pointer: coarse)').matches;
+  const pasteHint = () => (isTouch() ? 'tap Paste' : 'press Ctrl/⌘+V');
+
   function renderStatus() {
     const on = settings.enabled;
     const { mode } = Watcher;
     let text;
     let kind;
-    if (!on) [text, kind] = ['Off: copies are not read automatically (Ctrl/⌘+V still works)', 'off'];
+    if (!on) [text, kind] = [`Off: copies are not read automatically (${isTouch() ? 'Paste' : 'Ctrl/⌘+V'} still works)`, 'off'];
     else if (mode === 'auto') [text, kind] = [document.hasFocus() ? 'Watching clipboard' : 'Watching: switch back to this tab after copying', 'ok'];
     else if (mode === 'prompt') [text, kind] = ['Allow clipboard access to start', 'warn'];
-    else if (mode === 'denied') [text, kind] = ['Clipboard blocked in site settings: press Ctrl/⌘+V instead', 'error'];
-    else if (mode === 'paste') [text, kind] = ["This browser doesn't allow automatic reading: press Ctrl/⌘+V here", 'warn'];
+    else if (mode === 'denied') [text, kind] = [`Clipboard blocked in site settings: ${pasteHint()} instead`, 'error'];
+    else if (mode === 'paste') [text, kind] = [`This browser doesn't allow automatic reading: ${pasteHint()} to add`, 'warn'];
     else [text, kind] = ['Starting…', 'warn'];
     $('status').dataset.kind = kind;
     $('statusText').textContent = text;
     $('allow').hidden = !(on && mode === 'prompt');
     $('readNow').hidden = mode !== 'auto';
+    document.querySelectorAll('.needs-auto').forEach((b) => (b.hidden = mode !== 'auto'));
     $('enabled').checked = on;
     $('enabledState').textContent = on ? 'ON' : 'OFF';
     $('enabledState').closest('.autoread').classList.toggle('on', on);
@@ -106,7 +111,7 @@
       if (e?.name === 'NotAllowedError') {
         if (manual) {
           setMode(await detectMode());
-          if (Watcher.mode !== 'auto') toast('Clipboard access was not allowed. Press Ctrl/⌘+V to paste instead.');
+          if (Watcher.mode !== 'auto') toast(`Clipboard access was not allowed. ${isTouch() ? 'Tap Paste' : 'Press Ctrl/⌘+V'} to add text instead.`);
         }
       } else if (manual) {
         toast('Could not read the clipboard: ' + (e?.message || e));
@@ -181,7 +186,7 @@
     if (!settings.enabled) return toast('Auto-read is OFF. Copies are not read until you turn it back on.');
     if (Watcher.mode === 'prompt') return readClipboard(true); // this click lets the browser ask for permission
     if (Watcher.mode === 'paste' || Watcher.mode === 'denied') {
-      return toast("This browser doesn't let web pages read the clipboard automatically. Press Ctrl/⌘+V on this page instead.");
+      return toast(`This browser doesn't let web pages read the clipboard automatically. ${isTouch() ? 'Tap Paste' : 'Press Ctrl/⌘+V on this page'} instead.`);
     }
     toast('Auto-read is ON. Copy text anywhere, then come back to this tab.');
     readClipboard();
@@ -253,14 +258,19 @@
       if (r.clipId !== lastClip) (alt = !alt), (lastClip = r.clipId);
       const tr = el('tr', { className: (alt ? 'alt' : '') + (knownIds.has(r.id) ? '' : ' fresh') });
       tr.dataset.id = r.id;
-      tr.append(el('td', { className: 'meta', textContent: i + 1 }), el('td', { className: 'meta', textContent: fmtTime(r.capturedAt) }));
+      tr.append(el('td', { className: 'meta num', textContent: i + 1 }), el('td', { className: 'meta time', textContent: fmtTime(r.capturedAt) }));
       for (const c of cols) {
         const td = el('td', { className: 'cell', tabIndex: 0, title: 'Double-click to edit' });
+        td.dataset.label = c;
         td.dataset.col = c;
         if (r.data[c] != null) td.append(linkify(String(r.data[c])));
         tr.append(td);
       }
-      if (settings.keepSource) tr.append(el('td', { className: 'source', textContent: r.source || '', title: r.source || '' }));
+      if (settings.keepSource) {
+        const src = el('td', { className: 'source', textContent: r.source || '', title: r.source || '' });
+        src.dataset.label = 'Source';
+        tr.append(src);
+      }
       const actions = el('td', { className: 'actions' });
       if (r.source) {
         const why = el('button', { className: 'icon info', textContent: '?', title: 'Explain how this row was extracted', onclick: () => explainInAdmin(r.source) });
@@ -841,6 +851,47 @@
     if ($('testInput').value.trim()) handleText($('testInput').value, { force: true });
   });
   $('testExplain').addEventListener('click', () => explainInAdmin($('testInput').value));
+
+  // ---------- phone layout: bottom bar and "More" sheet ----------
+
+  function openTypeBox(afterPasteFailed) {
+    const details = $('testPanel').querySelector('details');
+    details.open = true;
+    $('testPanel').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    $('testInput').focus({ preventScroll: true });
+    if (afterPasteFailed) toast('Long-press the box, tap Paste, then "Add to table".');
+  }
+
+  /** One tap: read the clipboard now (the tap lets the browser ask for permission). */
+  async function pasteNow() {
+    if (window.isSecureContext && navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (Watcher.mode === 'prompt') setMode(await detectMode());
+        if (text && text.trim()) return handleText(text, { force: true });
+        return toast('The clipboard is empty. Copy some text first.');
+      } catch {
+        /* not allowed: fall back to pasting into the box */
+      }
+    }
+    openTypeBox(true);
+  }
+
+  $('mPaste').addEventListener('click', pasteNow);
+  $('mProjects').addEventListener('click', () => $('openProjects').click());
+  $('mSave').addEventListener('click', () => $('saveProject').click());
+  $('mMore').addEventListener('click', () => $('moreSheet').showModal());
+  $('moreClose').addEventListener('click', () => $('moreSheet').close());
+  $('moreSheet').addEventListener('click', (e) => {
+    if (e.target === $('moreSheet')) return $('moreSheet').close();
+    const btn = e.target.closest('[data-proxy]');
+    if (!btn) return;
+    $('moreSheet').close();
+    if (btn.dataset.proxy === '#testPanel summary') return openTypeBox(false);
+    document.querySelector(btn.dataset.proxy)?.click();
+  });
+  // Tap outside a dialog (on its backdrop) closes it.
+  for (const d of [$('projectsDialog')]) d.addEventListener('click', (e) => e.target === d && d.close());
 
   // ---------- live updates (this tab, other tabs, the admin panel) ----------
 

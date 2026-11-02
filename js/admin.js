@@ -391,7 +391,7 @@
           ...dropped,
         ]);
       });
-      out.push(step(2, 'Run the rules on each record', [el('p', { className: 'muted small', textContent: 'Highlighted text was matched. Hover a highlight to see its rule.' }), ...recs]));
+      out.push(step(2, 'Run the rules on each record', [el('p', { className: 'muted small', textContent: 'Highlighted text was matched. The chips below list each value and the rule that found it.' }), ...recs]));
       const dup = r.duplicateRows ? ` (${plural(r.duplicateRows, 'duplicate row')} removed)` : '';
       out.push(step(3, `Result: ${plural(r.rows.length, 'row')}${dup}`, r.rows.length ? [rowsTable(r.rows)] : [el('p', { className: 'muted', textContent: 'Nothing would be added to the table.' })]));
     }
@@ -599,6 +599,20 @@
     ...T.CHEATSHEET.map(([token, meaning]) => el('tr', {}, [el('td', {}, [el('code', { textContent: token })]), el('td', { textContent: meaning })]))
   );
 
+  // ---------- phone layout: tabs ----------
+
+  function showTab(tab) {
+    document.querySelector('main.admin').dataset.active = tab;
+    document.querySelectorAll('.admin-tabs [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+  }
+  document.querySelectorAll('.admin-tabs [data-tab]').forEach((b) =>
+    b.addEventListener('click', () => {
+      showTab(b.dataset.tab);
+      window.scrollTo({ top: 0 });
+    })
+  );
+  $('templatesDialog').addEventListener('close', () => showTab('rules'));
+
   // ---------- start ----------
 
   function renderAll() {
@@ -618,6 +632,7 @@
   $('testText').value = Store.getDraft() ?? SAMPLES.Contacts;
   renderAll();
   if (location.hash === '#test') {
+    showTab('test');
     setTimeout(() => $('test').scrollIntoView({ block: 'start' }), 50);
     $('testText').focus({ preventScroll: true });
   }
