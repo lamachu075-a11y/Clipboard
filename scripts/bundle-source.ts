@@ -8,7 +8,7 @@ import { create } from '../lib/zip.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = 'public/clipboard-extractor-source.zip';
-const INCLUDE = ['app', 'components', 'lib', 'scripts', 'test', 'public', '.github', 'package.json', 'package-lock.json', 'next.config.ts', 'tsconfig.json', 'next-env.d.ts', 'README.md', '.gitignore'];
+const INCLUDE = ['app', 'components', 'lib', 'scripts', 'test', 'public', 'deploy', '.github', 'package.json', 'package-lock.json', 'next.config.ts', 'tsconfig.json', 'next-env.d.ts', 'README.md', '.gitignore'];
 
 function walk(rel: string): string[] {
   const abs = path.join(root, rel);

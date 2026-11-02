@@ -103,6 +103,16 @@ Automatic clipboard reading needs `localhost` or `https`; Ctrl/⌘ + V and the P
 
 To serve the app from a sub-path, build with `BASE_PATH`, e.g. `BASE_PATH=/Clipboard npm run build`.
 
+### Host on your own server (subdomain)
+
+`deploy/setup-subdomain.sh` sets the app up on a subdomain of a server that already runs other
+sites with Nginx, including HTTPS, without touching them. Step-by-step guide: [deploy/README.md](deploy/README.md).
+
+```bash
+npm ci && npm run build
+sudo bash deploy/setup-subdomain.sh clip.example.com you@example.com --files out
+```
+
 ### Host on GitHub Pages
 
 The workflow in `.github/workflows/pages.yml` runs the type check and tests, builds the static site (with the right

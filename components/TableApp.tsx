@@ -13,7 +13,7 @@ import DataTable from './DataTable.tsx';
 import type { SortState } from './DataTable.tsx';
 
 /** How the clipboard can be read in this browser. */
-type Mode = 'checking' | 'auto' | 'prompt' | 'denied' | 'paste';
+type Mode = 'checking' | 'auto' | 'prompt' | 'denied' | 'paste' | 'insecure';
 
 const permissionToMode = (state: PermissionState): Mode => (state === 'granted' ? 'auto' : state === 'denied' ? 'denied' : 'prompt');
 const defaultProjectName = (): string => 'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -188,7 +188,8 @@ function TablePage() {
   // ---------- clipboard watcher ----------
 
   const detectMode = useCallback(async (): Promise<Mode> => {
-    if (!window.isSecureContext || !navigator.clipboard?.readText) return 'paste';
+    if (!window.isSecureContext) return 'insecure'; // clipboard reading needs https://
+    if (!navigator.clipboard?.readText) return 'paste';
     try {
       const status = await navigator.permissions.query({ name: 'clipboard-read' as PermissionName });
       status.onchange = () => setMode(permissionToMode(status.state));
@@ -295,6 +296,9 @@ function TablePage() {
     safely(() => Store.saveSettings({ ...Store.getSettings(), enabled: on }));
     if (!on) return toast('Auto-read is OFF. Copies are not read until you turn it back on.');
     if (mode === 'prompt') return readClipboard(true); // this click lets the browser ask for permission
+    if (mode === 'insecure') {
+      return toast(`Browsers only allow automatic clipboard reading on https:// pages. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V on this page'} instead, or set up HTTPS.`);
+    }
     if (mode === 'paste' || mode === 'denied') {
       return toast(`This browser doesn't let web pages read the clipboard automatically. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V on this page'} instead.`);
     }
@@ -512,6 +516,7 @@ function TablePage() {
   else if (mode === 'prompt') status = ['Allow clipboard access to start', 'warn'];
   else if (mode === 'denied') status = [`Clipboard blocked in site settings: ${pasteHint} instead`, 'error'];
   else if (mode === 'paste') status = [`This browser doesn't allow automatic reading: ${pasteHint} to add`, 'warn'];
+  else if (mode === 'insecure') status = [`Automatic reading needs an https:// address: ${pasteHint} to add`, 'warn'];
   else status = ['Starting…', 'warn'];
 
   let saveState = { text: '', cls: 'save-state', title: '' };
