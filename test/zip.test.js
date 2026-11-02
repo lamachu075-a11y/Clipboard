@@ -1,10 +1,10 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync } = require('node:child_process');
-const Zip = require('../js/zip.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import Zip from '../lib/zip.js';
 
 test('crc32 matches the reference value', () => {
   assert.equal(Zip.crc32(new TextEncoder().encode('123456789')), 0xcbf43926);

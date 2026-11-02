@@ -1,7 +1,7 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const E = require('../js/extractor.js');
-const T = require('../js/templates.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import E from '../lib/extractor.js';
+import T from '../lib/templates.js';
 
 // Only the template's rule, so built-in rules don't interfere.
 const onlyRule = (rule) => ({

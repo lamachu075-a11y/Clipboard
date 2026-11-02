@@ -137,12 +137,11 @@ kbd { font: 12px ui-monospace, Menlo, Consolas, monospace; border: 1px solid var
 
 /* download menu */
 .menu { position: relative; }
-.menu > summary {
+.menu > .menu-button {
   list-style: none; cursor: pointer; user-select: none;
   border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 12px;
 }
-.menu > summary::-webkit-details-marker { display: none; }
-.menu > summary:hover, .menu[open] > summary { background: var(--surface-2); }
+.menu > .menu-button:hover, .menu > .menu-button[aria-expanded="true"] { background: var(--surface-2); }
 .menu-list {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 280px; max-width: calc(100vw - 32px);
   display: grid; padding: 4px; background: var(--surface); border: 1px solid var(--border);
@@ -367,20 +366,20 @@ dialog.sheet { padding: 8px 12px 12px; width: min(420px, calc(100vw - 32px)); }
 .sheet-close { width: 100%; margin-top: 8px; padding: 12px; font-weight: 600; }
 
 @media (max-width: 700px) {
-  body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .table-page { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   button, select, input { font-size: 16px; } /* no zoom-on-focus on iOS */
 
   /* header */
   .topbar { padding: 10px 12px; gap: 8px; position: sticky; }
   .brand { gap: 8px 10px; width: 100%; }
-  body:not(.admin-page) .brand h1 { display: none; }
+  .table-page .brand h1 { display: none; }
   .project { flex: 1; min-width: 0; }
   .project input { flex: 1; min-width: 0; max-width: none; width: auto !important; font-size: 17px; padding: 4px 4px; }
   .autoread { order: 3; }
   .status { order: 4; width: 100%; font-size: 12.5px; }
   #allow { order: 5; width: 100%; padding: 10px; }
   .tools { width: 100%; }
-  body:not(.admin-page) .tools > *:not(#search) { display: none !important; }
+  .table-page .tools > *:not(#search) { display: none !important; }
   .tools #search { width: 100%; padding: 9px 12px; }
 
   main { padding: 12px; }
@@ -471,7 +470,7 @@ dialog.sheet { padding: 8px 12px 12px; width: min(420px, calc(100vw - 32px)); }
   main.admin[data-active="rules"] section.card[data-tab="rules"],
   main.admin[data-active="test"] section.card[data-tab="test"],
   main.admin[data-active="settings"] section.card[data-tab="settings"] { display: block; }
-  .admin-page body, body.admin-page { padding-bottom: env(safe-area-inset-bottom); }
+  .admin-page { padding-bottom: env(safe-area-inset-bottom); }
   .card { padding: 12px; }
   .card-head .row { width: 100%; }
   .card-head .row button { flex: 1; padding: 10px 6px; }
@@ -493,3 +492,8 @@ dialog.sheet { padding: 8px 12px 12px; width: min(420px, calc(100vw - 32px)); }
   .autoread { flex: 1 1 100%; justify-content: flex-start; padding: 6px 10px 6px 6px; }
   .autoread-state { margin-left: auto; }
 }
+
+/* inline cell editing */
+#table td.cell.editing { padding: 3px 4px; }
+#table td.cell.editing input { width: 100%; min-width: 8em; padding: 4px 6px; }
+.loading { padding: 40px 16px; text-align: center; color: var(--muted); }

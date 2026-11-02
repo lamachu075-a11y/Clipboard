@@ -4,8 +4,8 @@ A web app that **reads your clipboard automatically**, **extracts the data you c
 and **collects it in a table**. One copy can produce **many rows**: every contact in a list,
 every line of a spreadsheet, every email in a paragraph.
 
-It's a static site (HTML, CSS and JavaScript, no build step, no server code), so you can open it
-locally or host it on GitHub Pages. Everything stays in your browser.
+Built with **Next.js 16** (App Router) and **React 19**. It is exported as a static site (no server
+code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in your browser.
 
 ## Features
 
@@ -22,7 +22,7 @@ locally or host it on GitHub Pages. Everything stays in your browser.
 - **Multiple rows from one clipboard:** spreadsheet copies, blank-line separated blocks, one record
   per line, or a custom delimiter. Several values in one record become one row each, or one joined cell.
 
-### Admin panel (`admin.html`)
+### Admin panel (`/admin`)
 - Every extraction rule in one place, **with its regular expression**. Built-in patterns can be
   edited, renamed or reset. Custom rules can be added, re-ordered and deleted. Any rule can be marked *required*.
 - **Regex templates:** *Add from template* opens a library of 26 ready-made patterns in 7 groups
@@ -58,7 +58,7 @@ locally or host it on GitHub Pages. Everything stays in your browser.
   - **Table as CSV** (Excel) or **JSON**.
   - **Project file (.json)**: the whole project in one file, for backups or another computer.
   - **Print / Save as PDF**: the browser's print dialog, with a clean print layout.
-  - **App source code (.zip)**.
+  - **App source code (.zip)**: this Next.js project, packed at build time.
 - **Copy** puts the table on the clipboard as tab-separated text for Excel / Google Sheets.
 
 > The built-in PDF uses the standard PDF fonts, which cover Latin-script languages (English, Spanish,
@@ -88,17 +88,24 @@ Browsers only let a web page read the clipboard **while its tab is focused**, an
 
 ## Run it
 
+Needs Node.js 18.18 or newer (20+ recommended).
+
 ```bash
-npm start            # serves the app at http://localhost:8080 (needs Python 3)
-# or any static server, e.g.: npx serve .
+npm install
+npm run dev      # development server with hot reload: http://localhost:3000
+npm test         # unit tests for the extraction engine, templates, PDF and ZIP writers
+npm run build    # static export to ./out
+npm start        # serve ./out at http://localhost:8080
 ```
 
-You can also open `index.html` directly. Ctrl/⌘ + V always works that way, but automatic
-reading is only guaranteed on `localhost` or `https`.
+Automatic clipboard reading needs `localhost` or `https`; Ctrl/⌘ + V and the Paste button work everywhere.
+
+To serve the app from a sub-path, build with `BASE_PATH`, e.g. `BASE_PATH=/Clipboard npm run build`.
 
 ### Host on GitHub Pages
 
-The workflow in `.github/workflows/pages.yml` tests and deploys the site on every push to `main`.
+The workflow in `.github/workflows/pages.yml` runs the tests, builds the static site (with the right
+base path for your repository) and deploys it on every push to `main`.
 Turn it on once under **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
 ## Project file format
@@ -120,13 +127,20 @@ Turn it on once under **Settings → Pages → Build and deployment → Source: 
 
 | Path | What it is |
 | --- | --- |
-| `index.html`, `js/app.js` | the table page: clipboard watcher, projects, downloads |
-| `admin.html`, `js/admin.js` | the admin panel: rules editor, test & explain |
-| `js/extractor.js` | extraction engine with `extract()` and `explain()` (pure JS, no DOM, unit tested) |
-| `js/store.js` | browser storage: current project (`localStorage`), saved Projects (IndexedDB), cross-tab change events |
-| `js/ui.js` | shared helpers: toasts, downloads, saving and opening files |
-| `js/zip.js` | small dependency-free ZIP writer used for "App source code" |
-| `js/templates.js` | regex template library and quick reference for the admin panel |
-| `js/pdf.js` | small dependency-free PDF writer used for "Table as PDF" |
-| `css/app.css` | styles (light and dark) |
-| `test/` | `npm test`: unit tests (Node 18+) |
+| `app/layout.jsx` | root layout: page metadata, manifest, global styles |
+| `app/page.jsx` | `/`: the table page |
+| `app/admin/page.jsx` | `/admin`: the admin panel |
+| `app/globals.css` | styles (light and dark, desktop and phone layouts) |
+| `components/TableApp.jsx` | table page: clipboard watcher, auto-read switch, projects, downloads, phone bar |
+| `components/DataTable.jsx` | the rows table (cards on phones), sorting and inline editing |
+| `components/AdminApp.jsx` | admin panel: rules editor, regex templates, test & explain, settings |
+| `components/common.jsx` | toast, modal dialog, store-sync and touch hooks |
+| `lib/extractor.js` | extraction engine with `extract()` and `explain()` (pure JS, unit tested) |
+| `lib/templates.js` | regex template library and quick reference |
+| `lib/store.js` | browser storage: current project (`localStorage`), saved Projects (IndexedDB), cross-tab sync |
+| `lib/projectio.js` | project files and CSV / JSON / PDF exports |
+| `lib/files.js` | downloads, saving and opening files |
+| `lib/pdf.js`, `lib/zip.js` | small dependency-free PDF and ZIP writers |
+| `public/` | icons and the web app manifest |
+| `scripts/` | build helpers: pack the source zip, serve the static build |
+| `test/` | `npm test`: unit tests |

@@ -2,10 +2,18 @@
   "name": "clipboard-extractor",
   "version": "1.0.0",
   "private": true,
-  "description": "Web app that reads the clipboard and extracts structured data into a table.",
+  "description": "Next.js web app that reads the clipboard and extracts structured data into a table.",
   "scripts": {
-    "start": "python3 -m http.server 8080",
+    "dev": "node scripts/bundle-source.mjs && next dev",
+    "build": "node scripts/bundle-source.mjs && next build",
+    "start": "node scripts/serve.mjs",
     "test": "node --test test/*.test.js"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
 }

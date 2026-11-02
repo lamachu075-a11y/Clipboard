@@ -1,6 +1,6 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const E = require('../js/extractor.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import E from '../lib/extractor.js';
 
 test('one line with several fields becomes one row', () => {
   const rows = E.extract('Contact John at john@acme.com or +1 (555) 123-4567');
