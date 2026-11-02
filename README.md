@@ -19,8 +19,13 @@ code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in y
 - **Built-in rules:** Email, Phone, URL, Date, Amount/Currency, IP address, Hashtag, and
   `Key: Value` lines (e.g. `Name: Jane Doe` becomes a *Name* column).
 - **Custom rules:** any regular expression becomes a column.
-- **Multiple rows from one clipboard:** spreadsheet copies, blank-line separated blocks, one record
-  per line, or a custom delimiter. Several values in one record become one row each, or one joined cell.
+- **Multiple rows from one clipboard:** spreadsheet copies, chat messages, blank-line separated blocks,
+  one record per line, or a custom delimiter. Several values in one record become one row each, or one joined cell.
+- **Chat copies** (WhatsApp `[02/11, 16:58] Name:`, WhatsApp Web `[16:58, 02/11/2026] Name:`, chat exports
+  `02/11/2026, 16:58 - Name:`): each message becomes its own record and the `[date, time] name:` part is
+  ignored. In other text, when a label such as `Username:` comes back, it starts a new record.
+- **Only keep these columns** (Admin panel → Records & rows), e.g. `Date, Platform, Credit`: the table and
+  downloads show just those columns, in that order.
 
 ### Admin panel (`/admin`)
 - Every extraction rule in one place, **with its regular expression**. Built-in patterns can be

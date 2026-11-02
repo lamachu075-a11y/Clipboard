@@ -162,3 +162,72 @@ test('"Label: value" lines defer to a custom rule with the same name', () => {
   });
   assert.deepEqual(rows, [{ 'Bill to': 'Acme Corp' }]);
 });
+
+// ---------- chat messages ----------
+
+const RECHARGE = (date: string, user: string, platform: string, credit: string, head = '[02/11, 16:58] K: ') =>
+  `${head}${date}\nUsername: ${user}\nPlatform: ${platform}\nCredit: ${credit}\nRecharged ✅️`;
+
+test('WhatsApp copy: each message is a record, identical messages give one row', () => {
+  const text = RECHARGE('March 9, 2026', 'mike777', 'os', '5555') + '\n' + RECHARGE('March 9, 2026', 'mike777', 'os', '5555');
+  const r = E.explain(text);
+  assert.equal(r.mode, 'messages');
+  assert.equal(r.records.length, 2);
+  assert.deepEqual(r.rows, [{ Username: 'mike777', Platform: 'os', Credit: '5555', Date: 'March 9, 2026' }]);
+});
+
+test('different messages stay aligned even when values repeat', () => {
+  const text = [
+    RECHARGE('March 9, 2026', 'mike777', 'os', '5555'),
+    RECHARGE('March 10, 2026', 'anna01', 'android', '5555', '[02/11, 17:02] K: '),
+    RECHARGE('March 11, 2026', 'raj', 'os', '1200', '[02/11, 17:05] K: '),
+  ].join('\n');
+  assert.deepEqual(E.extract(text, { keepColumns: 'Date, Platform, Credit' }), [
+    { Date: 'March 9, 2026', Platform: 'os', Credit: '5555' },
+    { Date: 'March 10, 2026', Platform: 'android', Credit: '5555' },
+    { Date: 'March 11, 2026', Platform: 'os', Credit: '1200' },
+  ]);
+});
+
+test('WhatsApp Web and chat-export headers are recognised and ignored', () => {
+  const web = RECHARGE('March 9, 2026', 'a', 'os', '1', '[16:58, 02/11/2026] K: ') + '\n' + RECHARGE('March 10, 2026', 'b', 'ios', '2', '[17:01, 02/11/2026] K: ');
+  const exp = RECHARGE('March 9, 2026', 'a', 'os', '1', '02/11/2026, 4:58 PM - K: ') + '\n' + RECHARGE('March 10, 2026', 'b', 'ios', '2', '02/11/2026, 5:01 PM - K: ');
+  for (const text of [web, exp]) {
+    const rows = E.extract(text, { keepColumns: 'date,platform,credit' });
+    // The header's own date (02/11/2026) must not appear as a second date.
+    assert.deepEqual(rows, [
+      { Date: 'March 9, 2026', Platform: 'os', Credit: '1' },
+      { Date: 'March 10, 2026', Platform: 'ios', Credit: '2' },
+    ]);
+  }
+});
+
+test('a single copied message works too', () => {
+  assert.deepEqual(E.extract(RECHARGE('March 9, 2026', 'mike777', 'os', '5555'), { keepColumns: 'Date, Platform, Credit' }), [
+    { Date: 'March 9, 2026', Platform: 'os', Credit: '5555' },
+  ]);
+});
+
+test('without chat headers, a repeated first label starts a new record', () => {
+  const text = 'Username: a\nPlatform: os\nCredit: 1\nUsername: b\nPlatform: android\nCredit: 1\nUsername: c\nPlatform: os\nCredit: 3';
+  const r = E.explain(text);
+  assert.equal(r.mode, 'labels');
+  assert.deepEqual(r.rows, [
+    { Username: 'a', Platform: 'os', Credit: '1' },
+    { Username: 'b', Platform: 'android', Credit: '1' },
+    { Username: 'c', Platform: 'os', Credit: '3' },
+  ]);
+});
+
+test('keepColumns keeps only the named columns, in that order, and drops empty rows', () => {
+  const r = E.explain('Name: A\nEmail: a@x.com\nCity: Rome', { keepColumns: 'City, Name, Missing' });
+  assert.deepEqual(r.rows, [{ City: 'Rome', Name: 'A' }]);
+  assert.deepEqual(r.keptColumns, ['City', 'Name', 'Missing']);
+  assert.deepEqual(E.extract('a@x.com', { keepColumns: 'Phone' }), []);
+});
+
+test('the "messages" split mode can be chosen explicitly', () => {
+  const r = E.explain('just text, no chat headers', { splitMode: 'messages' });
+  assert.equal(r.mode, 'whole');
+  assert.match(r.reason, /no headers/);
+});

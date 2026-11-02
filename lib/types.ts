@@ -5,7 +5,9 @@ export type BuiltinKey = 'email' | 'url' | 'ip' | 'date' | 'amount' | 'phone' | 
 /** Built-in rules plus "Key: Value" lines. */
 export type FieldKey = BuiltinKey | 'kv';
 
-export type SplitMode = 'auto' | 'whole' | 'line' | 'blank' | 'custom';
+export type SplitMode = 'auto' | 'whole' | 'line' | 'blank' | 'messages' | 'custom';
+/** How a text was actually split (auto mode can also split at repeated labels). */
+export type RecordMode = Exclude<SplitMode, 'auto'> | 'labels';
 export type MatchMode = 'zip' | 'join';
 
 /** Per-installation settings of a built-in rule. */
@@ -52,6 +54,8 @@ export interface Settings {
   keepSource: boolean;
   /** Ignore clipboard text shorter than this. */
   minLength: number;
+  /** Comma-separated column names to keep, in this order (empty: keep all). */
+  keepColumns: string;
   fields: Record<FieldKey, FieldConfig>;
   customFields: CustomField[];
 }
@@ -65,7 +69,17 @@ export type SettingsInput = Partial<Omit<Settings, 'fields' | 'customFields'>> &
 /** The extraction part of the settings (what the admin panel edits and projects store). */
 export type Rules = Pick<
   Settings,
-  'splitMode' | 'delimiter' | 'matchMode' | 'repeatSingles' | 'detectTables' | 'dedupeRows' | 'keepSource' | 'minLength' | 'fields' | 'customFields'
+  | 'splitMode'
+  | 'delimiter'
+  | 'matchMode'
+  | 'repeatSingles'
+  | 'detectTables'
+  | 'dedupeRows'
+  | 'keepSource'
+  | 'minLength'
+  | 'keepColumns'
+  | 'fields'
+  | 'customFields'
 >;
 
 /** One extracted row: column name → value. */
@@ -160,7 +174,7 @@ export interface ExplainResult {
   text: string;
   kind: 'text' | 'table';
   /** How the text was split into records (text kind only). */
-  mode: Exclude<SplitMode, 'auto'> | null;
+  mode: RecordMode | null;
   reason: string;
   records: RecordTrace[];
   rows: RowData[];
@@ -168,6 +182,8 @@ export interface ExplainResult {
   rules?: RuleSummary[];
   /** Identical rows removed. */
   duplicateRows: number;
+  /** Columns kept by the "only keep these columns" setting, if set. */
+  keptColumns: string[] | null;
   /** Why the text was ignored, if it was. */
   ignored: string | null;
 }

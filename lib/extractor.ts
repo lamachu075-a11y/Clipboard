@@ -33,6 +33,7 @@ import type {
   Rules,
   Settings,
   SettingsInput,
+  RecordMode,
   SplitMode,
 } from './types.ts';
 
@@ -186,6 +187,7 @@ const DEFAULT_SETTINGS: Settings = {
   dedupeRows: true,
   keepSource: true,
   minLength: 3,
+  keepColumns: '',
   fields: Object.fromEntries(
     [...BUILTIN_FIELDS, KV_FIELD].map((f) => [f.key, { enabled: f.defaultEnabled, required: false }])
   ) as Record<FieldKey, FieldConfig>,
@@ -205,6 +207,7 @@ function normalizeSettings(input?: SettingsInput | null): Settings {
   out.customFields = Array.isArray(s.customFields) ? s.customFields.map((c) => ({ ...c })) : [];
   out.pollInterval = Math.max(250, Number(out.pollInterval) || DEFAULT_SETTINGS.pollInterval);
   out.minLength = Math.max(0, Number(out.minLength) || 0);
+  out.keepColumns = typeof out.keepColumns === 'string' ? out.keepColumns : '';
   return out;
 }
 
@@ -518,8 +521,62 @@ const BLANK_LINES = /\n[ \t]*\n(?:[ \t]*\n)*/g;
 const LINES = /\n/g;
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** A trimmed piece of text from s to e, with its position (null if empty). */
+function segment(text: string, s: number, e: number): RecordPiece | null {
+  const raw = text.slice(s, e);
+  const t = raw.trim();
+  return t ? { text: t, offset: s + raw.length - raw.trimStart().length } : null;
+}
+
+/*
+ * Chat message headers, as copied from WhatsApp and similar apps:
+ *   [02/11, 16:58] Name:          (WhatsApp copy)
+ *   [16:58, 02/11/2026] Name:     (WhatsApp Web copy)
+ *   02/11/2026, 16:58 - Name:     (WhatsApp chat export)
+ */
+const SP = '[ \\t\\u00a0\\u202f]';
+const CHAT_DATE = '\\d{1,2}[/.-]\\d{1,2}(?:[/.-]\\d{2,4})?';
+const CHAT_TIME = `\\d{1,2}:\\d{2}(?::\\d{2})?(?:${SP}?[AaPp]\\.?${SP}?[Mm]\\.?)?`;
+const CHAT_HEADER = new RegExp(
+  `^[ \\t]*(?:\\[(?:${CHAT_DATE},?${SP}+${CHAT_TIME}|${CHAT_TIME},?${SP}+${CHAT_DATE})\\]|${CHAT_DATE},?${SP}+${CHAT_TIME}${SP}+-)${SP}*[^:\\n]{1,50}?:${SP}?`,
+  'gm'
+);
+
+/** Messages of a chat copy (without their "[date, time] name:" headers), or null if it isn't one. */
+function chatMessages(text: string): RecordPiece[] | null {
+  const heads = Array.from(text.matchAll(CHAT_HEADER));
+  if (!heads.length) return null;
+  // One header is enough if the text starts with it (a single copied message).
+  if (heads.length < 2 && text.slice(0, heads[0].index).trim()) return null;
+  const out: RecordPiece[] = [];
+  const before = segment(text, 0, heads[0].index);
+  if (before) out.push(before);
+  heads.forEach((h, i) => {
+    const end = i + 1 < heads.length ? heads[i + 1].index : text.length;
+    const piece = segment(text, h.index + h[0].length, end);
+    if (piece) out.push(piece);
+  });
+  return out.length ? out : null;
+}
+
+/** When the first "Key:" label comes back, each repeat starts a new record. */
+function labelRecords(text: string): { records: RecordPiece[]; label: string } | null {
+  const pairs = parseKeyValues(text);
+  if (pairs.length < 2) return null;
+  const first = pairs[0].key.toLowerCase();
+  const starts = pairs.filter((p) => p.key.toLowerCase() === first).map((p) => text.lastIndexOf('\n', p.start - 1) + 1);
+  if (starts.length < 2) return null;
+  const cuts = [0, ...starts.slice(1), text.length];
+  const records: RecordPiece[] = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const piece = segment(text, cuts[i], cuts[i + 1]);
+    if (piece) records.push(piece);
+  }
+  return { records, label: pairs[0].key };
+}
+
 interface Split {
-  mode: Exclude<SplitMode, 'auto'>;
+  mode: RecordMode;
   records: RecordPiece[];
   reason: string;
 }
@@ -538,12 +595,26 @@ function splitRecords(text: string, settings: Settings, rules: Rule[]): Split {
       const records = pieces(text, BLANK_LINES);
       return { mode: 'blank', records, reason: `Setting: split at blank lines (${plural(records.length, 'block')}).` };
     }
+    case 'messages': {
+      const records = chatMessages(text);
+      return records
+        ? { mode: 'messages', records, reason: `Setting: each chat message is a record (${plural(records.length, 'message')}); the "[date, time] name:" part is ignored.` }
+        : { mode: 'whole', records: whole, reason: 'Setting: chat messages, but no headers like "[02/11, 16:58] Name:" were found, so the whole text is one record.' };
+    }
     case 'custom': {
       const d = (settings.delimiter || '\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
       const records = pieces(text, new RegExp(escapeRegex(d), 'g'));
       return { mode: 'custom', records, reason: `Setting: split at "${settings.delimiter}" (${plural(records.length, 'record')}).` };
     }
     default: {
+      const chat = chatMessages(text);
+      if (chat) {
+        return {
+          mode: 'messages',
+          records: chat,
+          reason: `Auto: the text is a chat copy (lines like "[02/11, 16:58] Name:"), so each of the ${plural(chat.length, 'message')} is a record; the "[date, time] name:" part is ignored.`,
+        };
+      }
       const blocks = pieces(text, BLANK_LINES);
       if (blocks.length >= 2) {
         return { mode: 'blank', records: blocks, reason: `Auto: the text has blank lines, so each of the ${blocks.length} blocks is a record.` };
@@ -551,10 +622,18 @@ function splitRecords(text: string, settings: Settings, rules: Rule[]): Split {
       const lines = pieces(text, LINES);
       if (lines.length < 2) return { mode: 'whole', records: whole, reason: 'Auto: a single line, so the whole text is one record.' };
       if (settings.fields.kv.enabled && parseKeyValues(text).length >= 2) {
+        const byLabel = labelRecords(text);
+        if (byLabel) {
+          return {
+            mode: 'labels',
+            records: byLabel.records,
+            reason: `Auto: the label "${byLabel.label}" comes back ${byLabel.records.length} times, so each "${byLabel.label}:" starts a new record.`,
+          };
+        }
         return {
           mode: 'whole',
           records: whole,
-          reason: 'Auto: the text has "Key: Value" lines, so it is kept together as one record (repeated labels become separate rows).',
+          reason: 'Auto: the text has "Key: Value" lines, so it is kept together as one record.',
         };
       }
       const withData = lines.filter((l) => extractRecord(l.text, 0, rules).cols.size > 0).length;
@@ -570,7 +649,18 @@ function splitRecords(text: string, settings: Settings, rules: Rule[]): Split {
 function explain(input: unknown, settingsInput?: SettingsInput | null): ExplainResult {
   const settings = normalizeSettings(settingsInput);
   const text = String(input == null ? '' : input).replace(/\r\n?/g, '\n');
-  const result: ExplainResult = { text, kind: 'text', mode: null, reason: '', records: [], rows: [], errors: [], duplicateRows: 0, ignored: null };
+  const result: ExplainResult = {
+    text,
+    kind: 'text',
+    mode: null,
+    reason: '',
+    records: [],
+    rows: [],
+    errors: [],
+    duplicateRows: 0,
+    keptColumns: null,
+    ignored: null,
+  };
 
   if (text.trim().length < Math.max(1, settings.minLength)) {
     result.ignored = text.trim() ? `Text is shorter than the minimum of ${settings.minLength} characters.` : 'No text.';
@@ -596,6 +686,26 @@ function explain(input: unknown, settingsInput?: SettingsInput | null): ExplainR
       result.records.push({ text: rec.text, offset: rec.offset, matches, rows: built.rows, dropped: built.dropped });
       rows.push(...built.rows);
     }
+  }
+
+  // "Only keep these columns": pick them, in the order given.
+  const keep = settings.keepColumns
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (keep.length) {
+    result.keptColumns = keep;
+    rows = rows
+      .map((r) => {
+        const byName = new Map(Object.keys(r).map((k) => [k.toLowerCase(), k]));
+        const out: RowData = {};
+        for (const want of keep) {
+          const k = byName.get(want.toLowerCase());
+          if (k && r[k]) out[k] = r[k];
+        }
+        return out;
+      })
+      .filter((r) => Object.keys(r).length);
   }
 
   // Drop identical rows produced by the same text.
@@ -625,7 +735,19 @@ function rowKey(data: RowData): string {
 }
 
 /** Extraction-related part of the settings (what the admin panel edits). */
-const RULE_KEYS = ['splitMode', 'delimiter', 'matchMode', 'repeatSingles', 'detectTables', 'dedupeRows', 'keepSource', 'minLength', 'fields', 'customFields'] as const;
+const RULE_KEYS = [
+  'splitMode',
+  'delimiter',
+  'matchMode',
+  'repeatSingles',
+  'detectTables',
+  'dedupeRows',
+  'keepSource',
+  'minLength',
+  'keepColumns',
+  'fields',
+  'customFields',
+] as const;
 
 function rulesOf(settings?: SettingsInput | null): Rules {
   const s = normalizeSettings(settings);

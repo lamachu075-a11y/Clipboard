@@ -20,6 +20,9 @@ const SAMPLES: Record<string, string> = {
     'Questions? billing@acme.com or sales@acme.com, +1 (555) 123-4567\nPay online: https://pay.acme.com/inv/2041.',
   List: 'John Smith  john@acme.com  555-123-4567\nJane Doe  jane@globex.io  555-987-6543\nBob Lee  bob@initech.org\nServer down since 192.168.100.200',
   Spreadsheet: 'Name\tEmail\tCity\nAli\tali@example.com\tDubai\nMei\tmei@example.cn\tShanghai',
+  Chat:
+    '[02/11, 16:58] K: March 9, 2026\nUsername: mike777\nPlatform: os\nCredit: 5555\nRecharged ✅️\n' +
+    '[02/11, 17:02] K: March 10, 2026\nUsername: anna01\nPlatform: android\nCredit: 1200\nRecharged ✅️',
 };
 
 const STATUS_TEXT: Record<MatchStatus, string> = { used: '', duplicate: 'duplicate', skipped: 'skipped', rejected: 'rejected' };
@@ -444,6 +447,7 @@ function AdminPage() {
                   <option value="whole">Whole text is one record</option>
                   <option value="line">Each line</option>
                   <option value="blank">Blank lines (paragraphs)</option>
+                  <option value="messages">Chat messages (WhatsApp &quot;[date, time] Name:&quot;)</option>
                   <option value="custom">Custom delimiter</option>
                 </select>
               </label>
@@ -453,6 +457,17 @@ function AdminPage() {
                   <input type="text" id="delimiter" placeholder="---  (\n = newline, \t = tab)" value={settings.delimiter} onChange={(e) => update((s) => (s.delimiter = e.target.value))} />
                 </label>
               ) : null}
+              <label className="field-col" htmlFor="keepColumns">
+                Only keep these columns
+                <input
+                  type="text"
+                  id="keepColumns"
+                  placeholder="e.g. Date, Platform, Credit   (empty: keep all)"
+                  value={settings.keepColumns}
+                  onChange={(e) => update((s) => (s.keepColumns = e.target.value))}
+                />
+              </label>
+              <p className="muted small">Column names separated by commas, in the order you want them. Other columns are left out of the table and downloads.</p>
               <label className="field">
                 Several values in one record
                 <select id="matchMode" value={settings.matchMode} onChange={(e) => update((s) => (s.matchMode = e.target.value as Settings['matchMode']))}>
@@ -746,6 +761,12 @@ function Step({ n, title, children }: { n: number; title: string; children?: Rea
   );
 }
 
+/** Says which columns the "Only keep these columns" setting keeps. */
+function KeptNote({ cols }: { cols: string[] | null }) {
+  if (!cols) return null;
+  return <p className="muted small">Only keeping the columns: {cols.join(', ')} (set in Settings → Records &amp; rows).</p>;
+}
+
 function Explanation({ result: r }: { result: ExplainResult }) {
   const errors = r.errors.map((e) => (
     <p key={e.id} className="err">
@@ -768,6 +789,7 @@ function Explanation({ result: r }: { result: ExplainResult }) {
           <p>{r.reason}</p>
         </Step>
         <Step n={2} title={`Result: ${plural(r.rows.length, 'row')}`}>
+          <KeptNote cols={r.keptColumns} />
           <RowsTable rows={r.rows} />
         </Step>
       </div>
@@ -811,6 +833,7 @@ function Explanation({ result: r }: { result: ExplainResult }) {
         ))}
       </Step>
       <Step n={3} title={`Result: ${plural(r.rows.length, 'row')}${dup}`}>
+        <KeptNote cols={r.keptColumns} />
         {r.rows.length ? <RowsTable rows={r.rows} /> : <p className="muted">Nothing would be added to the table.</p>}
       </Step>
     </div>
