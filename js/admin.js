@@ -108,7 +108,7 @@
     }
 
     card.append(top, regexRow);
-    if (description) card.append(el('p', { className: 'desc', textContent: description }));
+    if (description !== undefined) card.append(el('p', { className: 'desc', textContent: description }));
     card.append(err);
     showErr();
     return card;
@@ -164,18 +164,18 @@
           name: cf.name || '',
           nameEditable: true,
           namePlaceholder: 'Column name (required)',
-          onName: (v) => change(() => (cf.name = v)),
+          onName: (v) => change(() => (cf.name = v)) || refreshHint(cf),
           tag: 'custom',
           pattern: cf.pattern || '',
           patternEditable: true,
-          onPattern: (v) => change(() => (cf.pattern = v)),
+          onPattern: (v) => change(() => (cf.pattern = v)) || refreshHint(cf),
           flags: cf.flags ?? '',
           onFlags: (v) => change(() => (cf.flags = v)),
           group: cf.group,
           onGroup: (v) => change(() => (cf.group = v)),
           required: cf.required,
           onRequired: (v) => change(() => (cf.required = v)),
-          description: !cf.name || !cf.pattern ? 'Give the rule a column name and a pattern to turn it on.' : '',
+          description: customHint(cf),
           actions: [
             move(-1),
             move(1),
@@ -254,6 +254,12 @@
     }
     $('rules').replaceChildren(...list);
     updateCounts();
+  }
+
+  const customHint = (cf) => (!String(cf.name || '').trim() || !cf.pattern ? 'Give the rule a column name and a pattern to turn it on.' : '');
+  function refreshHint(cf) {
+    const desc = $('rules').querySelector(`[data-rule="custom:${cf.id}"] .desc`);
+    if (desc) desc.textContent = customHint(cf);
   }
 
   /** Apply a change; `structural` re-renders the rules list. */

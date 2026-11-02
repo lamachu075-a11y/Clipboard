@@ -303,3 +303,4 @@ dialog.wide { width: min(720px, calc(100vw - 32px)); max-height: min(80vh, 760px
   #table td.cell:empty::before { content: ""; }
   #table tr { break-inside: avoid; }
 }
+.desc:empty { display: none; }
