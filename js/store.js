@@ -7,6 +7,8 @@
  *   rows      – [{ id, clipId, capturedAt, data: {col: value}, cols: [col...], source }]
  *   lastText  – last clipboard text seen (so a reload doesn't re-import it)
  *   stats     – { lastCaptureAt, lastCaptureCount }
+ *   project   – { name, createdAt, savedAt, fileName, dirty }
+ *   draft     – text in the admin panel's "Test & explain" box
  *
  * Changes made in another tab are broadcast through the `storage` event.
  */
@@ -65,9 +67,28 @@
       const rows = read('rows', []);
       return Array.isArray(rows) ? rows : [];
     },
-    setRows(rows) {
+    /** Replace all rows. Marks the project as having unsaved changes unless `dirty: false`. */
+    setRows(rows, { dirty = true } = {}) {
       write('rows', rows.slice(-MAX_ROWS));
       emit('rows');
+      const p = Store.getProject();
+      if (p.dirty !== dirty) Store.setProject(Object.assign(p, { dirty }));
+    },
+
+    getProject() {
+      const p = read('project', null);
+      return Object.assign({ name: 'Untitled project', createdAt: Date.now(), savedAt: null, fileName: null, dirty: false }, p || {});
+    },
+    setProject(project) {
+      write('project', project);
+      emit('project');
+    },
+
+    getDraft() {
+      return read('draft', null);
+    },
+    setDraft(text) {
+      write('draft', String(text).slice(0, 100000));
     },
 
     /**

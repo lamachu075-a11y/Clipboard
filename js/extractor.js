@@ -1,17 +1,25 @@
 /*
  * Clipboard Extractor – extraction engine.
  *
- * Pure JavaScript with no browser dependencies, so it can run in the
- * extension service worker, in extension pages, and in Node (for tests).
+ * Pure JavaScript with no DOM dependencies, so it runs in the browser and in
+ * Node (for tests).
  *
- * extract(text, settings) -> Array<Object<string, string>>
- *   Every object is one table row; keys are column names.
+ *   extract(text, settings) -> Array<Object<string, string>>
+ *     Every object is one table row; keys are column names.
  *
- * One clipboard can produce many rows:
- *   - spreadsheet/TSV copies become one row per spreadsheet line
- *   - text is split into records (blank-line blocks, lines, custom delimiter)
- *   - inside a record, multiple matches of the same field are spread across
- *     rows ("zip" mode) or joined into one cell ("join" mode)
+ *   explain(text, settings) -> trace of every step (used by the admin panel):
+ *     { kind, reason, records: [{ text, offset, matches, rows, dropped }], rows, errors, ... }
+ *
+ * How one clipboard becomes rows:
+ *   1. Spreadsheet copies (same number of tabs on every line) map 1:1 to rows.
+ *   2. Otherwise the text is split into records (blank-line blocks, lines,
+ *      a custom delimiter, or the whole text).
+ *   3. In each record the rules run in order: "Key: Value" lines, custom
+ *      rules, then built-in rules. Built-in rules claim the text they match,
+ *      so later built-in rules can't match it again.
+ *   4. Several matches of the same column in a record are spread across rows
+ *      ("zip" mode) or joined into one cell ("join" mode).
+ *   5. Rows missing a required column are dropped; duplicate rows are removed.
  */
 (function (global) {
   'use strict';
@@ -23,76 +31,111 @@
   const trimTrailing = (chars) => (v) => v.replace(new RegExp('[' + chars + ']+$'), '');
 
   /**
-   * Built-in fields, listed in evaluation order. Each field "claims" (masks)
-   * the text it matched, so later fields can't re-match it — e.g. digits
-   * inside a URL or a date are never reported as a phone number.
+   * Built-in rules, in evaluation order. The admin panel shows `pattern` and
+   * lets the user override it per installation.
    */
   const BUILTIN_FIELDS = [
     {
       key: 'email',
       label: 'Email',
+      hue: 210,
       defaultEnabled: true,
-      regex: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
+      description: 'name@domain.tld',
+      pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}',
+      flags: 'g',
     },
     {
       key: 'url',
       label: 'URL',
+      hue: 265,
       defaultEnabled: true,
-      regex: /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi,
+      description: 'Links starting with http://, https:// or www. Trailing punctuation is removed.',
+      pattern: '\\b(?:https?:\\/\\/|www\\.)[^\\s<>"\'`]+',
+      flags: 'gi',
       clean: trimTrailing('.,;:!?)\\]}\'"'),
     },
     {
       key: 'ip',
       label: 'IP Address',
+      hue: 185,
       defaultEnabled: false,
-      regex: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g,
+      description: 'IPv4 addresses such as 192.168.1.10',
+      pattern: '\\b(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\b',
+      flags: 'g',
     },
     {
       key: 'date',
       label: 'Date',
+      hue: 35,
       defaultEnabled: true,
-      regex: new RegExp(
+      description: '2026-11-02, 02/11/2026, 2 Nov 2026, Nov 2, 2026',
+      pattern:
         '\\b(?:' +
-          '\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}' + // 2026-11-02
-          '|\\d{1,2}[-/.]\\d{1,2}[-/.](?:\\d{4}|\\d{2})' + // 02/11/2026
-          '|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:' + MONTHS + ')\\.?,?\\s+\\d{4}' + // 2 Nov 2026
-          '|(?:' + MONTHS + ')\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4}' + // Nov 2, 2026
-          ')\\b',
-        'gi'
-      ),
+        '\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}' +
+        '|\\d{1,2}[-/.]\\d{1,2}[-/.](?:\\d{4}|\\d{2})' +
+        '|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:' + MONTHS + ')\\.?,?\\s+\\d{4}' +
+        '|(?:' + MONTHS + ')\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4}' +
+        ')\\b',
+      flags: 'gi',
     },
     {
       key: 'amount',
       label: 'Amount',
+      hue: 0,
       defaultEnabled: true,
-      regex:
-        /(?:[$€£¥₹]\s?|\b(?:USD|EUR|GBP|INR|JPY|AUD|CAD|Rs\.?)\s?)\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s?(?:USD|EUR|GBP|INR|JPY|AUD|CAD)\b/gi,
+      description: 'Money with a currency symbol or code: $1,250.50, € 99, 500 USD, Rs. 300',
+      pattern:
+        '(?:[$€£¥₹]\\s?|\\b(?:USD|EUR|GBP|INR|JPY|AUD|CAD|Rs\\.?)\\s?)\\d[\\d,]*(?:\\.\\d+)?' +
+        '|\\b\\d[\\d,]*(?:\\.\\d+)?\\s?(?:USD|EUR|GBP|INR|JPY|AUD|CAD)\\b',
+      flags: 'gi',
       clean: trimTrailing(','),
     },
     {
       key: 'phone',
       label: 'Phone',
+      hue: 140,
       defaultEnabled: true,
-      regex:
-        /(?<![\w+])(?:\+\d{1,3}[ \t.-]?)?(?:\(\d{1,4}\)[ \t.-]?)?\d{2,5}(?:[ \t.-]\d{2,5}){1,4}(?!\w)|(?<![\w+])\+?\d{10,13}(?!\w)/g,
+      description: 'Phone numbers with 7–15 digits, e.g. +1 (555) 123-4567, 020 7946 0958. Runs last so digits in dates, amounts and links are not counted.',
+      pattern:
+        '(?<![\\w+])(?:\\+\\d{1,3}[ \\t.-]?)?(?:\\(\\d{1,4}\\)[ \\t.-]?)?\\d{2,5}(?:[ \\t.-]\\d{2,5}){1,4}(?!\\w)' +
+        '|(?<![\\w+])\\+?\\d{10,13}(?!\\w)',
+      flags: 'g',
       validate: (v) => {
-        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(v)) return false; // IPv4, not a phone
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(v)) return 'looks like an IP address';
         const digits = v.replace(/\D/g, '').length;
-        return digits >= 7 && digits <= 15;
+        return digits >= 7 && digits <= 15 ? true : `has ${digits} digits (needs 7–15)`;
       },
     },
     {
       key: 'hashtag',
       label: 'Hashtag',
+      hue: 320,
       defaultEnabled: false,
-      regex: /(?<![\w#&])#[A-Za-z_]\w*/g,
+      description: '#tags',
+      pattern: '(?<![\\w#&])#[A-Za-z_]\\w*',
+      flags: 'g',
     },
   ];
 
   /** Column order for built-in fields (independent of evaluation order). */
   const DISPLAY_ORDER = ['email', 'phone', 'url', 'date', 'amount', 'ip', 'hashtag'];
 
-  const KV_FIELD = { key: 'kv', label: 'Labeled fields (Key: Value)', defaultEnabled: true };
+  const KV_LINE = /^\s*([A-Za-z][A-Za-z0-9 _./()#&-]{0,39}?)\s*[:=]\s*(\S.*?)\s*$/;
+  const KV_SKIP_KEYS = /^(https?|ftp|mailto|tel|file|data|javascript)$/i;
+
+  const KV_FIELD = {
+    key: 'kv',
+    label: 'Key: Value lines',
+    hue: 50,
+    defaultEnabled: true,
+    description:
+      'A line like "Name: Jane" or "City = Rome" creates a column named after the label. ' +
+      'Labels that match a built-in column (e.g. "Email:") are left to that rule.',
+    pattern: KV_LINE.source,
+    flags: '',
+  };
+
+  const CUSTOM_HUES = [95, 290, 15, 170, 230, 340, 60, 250];
 
   const DEFAULT_SETTINGS = {
     enabled: true,
@@ -105,7 +148,7 @@
     dedupeRows: true, // skip rows identical to one already in the table
     keepSource: true, // keep the original clipboard text with each row
     minLength: 3, // ignore clipboard text shorter than this
-    fields: {}, // { [builtinKey]: { enabled, required } }
+    fields: {}, // { [builtinKey]: { enabled, required, label?, pattern?, flags? } }
     customFields: [], // [{ id, name, pattern, flags, group, enabled, required }]
   };
 
@@ -126,7 +169,7 @@
     return out;
   }
 
-  /** Compile a user regex; returns { regex } or { error }. */
+  /** Compile a user regex; returns { regex } or { error }. Always global. */
   function compileCustom(cf) {
     try {
       let flags = String(cf.flags || '').replace(/[^dgimsuvy]/g, '');
@@ -138,31 +181,86 @@
     }
   }
 
+  const builtinRegex = (f) => new RegExp(f.pattern, f.flags);
+
+  /**
+   * Turn settings into the ordered list of active rules.
+   * @returns {{ rules: Array, errors: Array<{id, label, message}> }}
+   */
+  function compileRules(settings) {
+    const s = settings;
+    const rules = [];
+    const errors = [];
+    if (s.fields.kv.enabled) rules.push({ id: 'kv', type: 'kv', label: KV_FIELD.label, hue: KV_FIELD.hue });
+
+    s.customFields.forEach((cf, i) => {
+      if (cf.enabled === false) return;
+      const name = String(cf.name || '').trim();
+      if (!name || !cf.pattern) return;
+      const { regex, error } = compileCustom(cf);
+      if (error) return errors.push({ id: 'custom:' + cf.id, label: name, message: error });
+      rules.push({
+        id: 'custom:' + cf.id,
+        type: 'custom',
+        label: name,
+        regex,
+        group: Number(cf.group) || 0,
+        required: !!cf.required,
+        hue: CUSTOM_HUES[i % CUSTOM_HUES.length],
+      });
+    });
+
+    for (const f of BUILTIN_FIELDS) {
+      const cfg = s.fields[f.key];
+      if (!cfg.enabled) continue;
+      let regex = builtinRegex(f);
+      if (cfg.pattern || cfg.flags != null) {
+        const r = compileCustom({ pattern: cfg.pattern || f.pattern, flags: cfg.flags != null ? cfg.flags : f.flags });
+        if (r.error) errors.push({ id: f.key, label: f.label, message: r.error + ' (using the default pattern)' });
+        else regex = r.regex;
+      }
+      rules.push({
+        id: f.key,
+        type: 'builtin',
+        label: String(cfg.label || '').trim() || f.label,
+        regex,
+        clean: f.clean,
+        validate: f.validate,
+        required: !!cfg.required,
+        hue: f.hue,
+      });
+    }
+    return { rules, errors };
+  }
+
   const titleCase = (s) =>
     s
       .replace(/[_\s]+/g, ' ')
       .trim()
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const KV_LINE = /^\s*([A-Za-z][A-Za-z0-9 _./()#&-]{0,39}?)\s*[:=]\s*(\S.*?)\s*$/;
-  const KV_SKIP_KEYS = /^(https?|ftp|mailto|tel|file|data|javascript)$/i;
-
+  /** "Key: Value" lines with the position of each value. */
   function parseKeyValues(text) {
     const pairs = [];
+    let pos = 0;
     for (const line of text.split('\n')) {
       const m = KV_LINE.exec(line);
-      if (!m) continue;
-      const key = m[1].trim();
-      if (KV_SKIP_KEYS.test(key)) continue;
-      if (key.split(/\s+/).length > 5) continue; // looks like a sentence, not a label
-      if (/^\/\//.test(m[2])) continue; // "something://..." scheme
-      pairs.push([titleCase(key), m[2]]);
+      if (m) {
+        const key = m[1].trim();
+        const ok = !KV_SKIP_KEYS.test(key) && key.split(/\s+/).length <= 5 && !/^\/\//.test(m[2]);
+        if (ok) {
+          const end = pos + line.replace(/\s+$/, '').length;
+          pairs.push({ key: titleCase(key), value: m[2], start: end - m[2].length, end });
+        }
+      }
+      pos += line.length + 1;
     }
     return pairs;
   }
 
   function scanRegex(regex, text, group) {
     const results = [];
+    const g = Number(group) || 0;
     regex.lastIndex = 0;
     let m;
     while ((m = regex.exec(text)) !== null) {
@@ -170,85 +268,78 @@
         regex.lastIndex++;
         continue;
       }
-      const g = Number(group) || 0;
       const value = m[g] !== undefined ? m[g] : m[0];
-      results.push({ value, index: m.index, length: m[0].length });
+      const rel = g ? Math.max(0, m[0].indexOf(value)) : 0;
+      results.push({ value, index: m.index, length: m[0].length, start: m.index + rel, end: m.index + rel + value.length });
     }
     return results;
   }
 
   /**
-   * Find all field values in one record.
-   * Returns an ordered Map: column label -> unique values in order of appearance.
+   * Run every rule on one record.
+   * @returns {{ cols: Map<string, string[]>, matches: Array }}
+   *   matches: { ruleId, label, value, start, end, status: used|duplicate|skipped|rejected, note }
+   *   (start/end are positions in the full clipboard text)
    */
-  function extractValues(record, settings) {
-    const s = settings;
+  function extractRecord(text, offset, rules) {
     const cols = new Map();
-    const add = (label, value) => {
-      value = String(value).trim();
-      if (!value) return;
-      if (!cols.has(label)) cols.set(label, []);
-      const arr = cols.get(label);
-      if (!arr.includes(value)) arr.push(value);
+    const matches = [];
+    const add = (m) => {
+      m.value = String(m.value).trim();
+      matches.push(m);
+      if (m.status) return;
+      if (!m.value) return Object.assign(m, { status: 'skipped', note: 'empty value' });
+      if (!cols.has(m.label)) cols.set(m.label, []);
+      const arr = cols.get(m.label);
+      if (arr.includes(m.value)) return Object.assign(m, { status: 'duplicate', note: 'same value already found in this record' });
+      arr.push(m.value);
+      m.status = 'used';
     };
+    const builtinLabels = new Map(rules.filter((r) => r.type === 'builtin').map((r) => [r.label.toLowerCase(), r.label]));
 
-    // 1. "Key: Value" lines (dynamic columns).
-    const enabledBuiltinLabels = new Set(
-      BUILTIN_FIELDS.filter((f) => s.fields[f.key].enabled).map((f) => f.label.toLowerCase())
-    );
-    if (s.fields.kv.enabled) {
-      for (const [key, value] of parseKeyValues(record)) {
-        // "Email: x@y.com" is already handled by the Email extractor.
-        if (enabledBuiltinLabels.has(key.toLowerCase())) continue;
-        add(key, value);
+    for (const rule of rules) {
+      if (rule.type === 'kv') {
+        for (const p of parseKeyValues(text)) {
+          const m = { ruleId: 'kv', hue: rule.hue, label: p.key, value: p.value, start: offset + p.start, end: offset + p.end };
+          if (builtinLabels.has(p.key.toLowerCase())) {
+            Object.assign(m, { status: 'skipped', note: `left to the ${builtinLabels.get(p.key.toLowerCase())} rule` });
+          }
+          add(m);
+        }
+      } else if (rule.type === 'custom') {
+        for (const r of scanRegex(rule.regex, text, rule.group)) {
+          add({ ruleId: rule.id, hue: rule.hue, label: rule.label, value: r.value, start: offset + r.start, end: offset + r.end });
+        }
       }
     }
 
-    // 2. Custom regex fields (run on the original text).
-    for (const cf of s.customFields) {
-      if (cf.enabled === false || !cf.pattern || !cf.name) continue;
-      const { regex } = compileCustom(cf);
-      if (!regex) continue;
-      for (const r of scanRegex(regex, record, cf.group)) add(cf.name, r.value);
-    }
-
-    // 3. Built-in fields, masking what each one claims.
-    let masked = record;
+    // Built-in rules claim (mask) the text they match.
+    let masked = text;
     const found = {};
-    for (const f of BUILTIN_FIELDS) {
-      if (!s.fields[f.key].enabled) continue;
-      const values = [];
-      for (const r of scanRegex(f.regex, masked)) {
-        let v = f.clean ? f.clean(r.value) : r.value;
-        if (f.validate && !f.validate(v)) continue;
-        values.push(v);
-        masked = masked.slice(0, r.index) + ' '.repeat(r.length) + masked.slice(r.index + r.length);
+    for (const rule of rules) {
+      if (rule.type !== 'builtin') continue;
+      found[rule.id] = [];
+      for (const r of scanRegex(rule.regex, masked, 0)) {
+        const value = rule.clean ? rule.clean(r.value) : r.value;
+        const m = { ruleId: rule.id, hue: rule.hue, label: rule.label, value, start: offset + r.start, end: offset + r.start + value.length };
+        const verdict = rule.validate ? rule.validate(value) : true;
+        if (verdict !== true) {
+          Object.assign(m, { status: 'rejected', note: verdict || 'failed validation' });
+        } else {
+          masked = masked.slice(0, r.index) + ' '.repeat(r.length) + masked.slice(r.index + r.length);
+        }
+        found[rule.id].push(m);
       }
-      found[f.key] = values;
     }
-    for (const key of DISPLAY_ORDER) {
-      const f = BUILTIN_FIELDS.find((x) => x.key === key);
-      for (const v of found[key] || []) add(f.label, v);
-    }
-    return cols;
+    for (const key of DISPLAY_ORDER) for (const m of found[key] || []) add(m);
+
+    return { cols, matches };
   }
 
-  function requiredLabels(settings) {
-    const req = [];
-    for (const f of BUILTIN_FIELDS) {
-      const cfg = settings.fields[f.key];
-      if (cfg.enabled && cfg.required) req.push(f.label);
-    }
-    for (const cf of settings.customFields) {
-      if (cf.enabled !== false && cf.required && cf.name) req.push(cf.name);
-    }
-    return req;
-  }
-
-  /** Turn one record's column map into one or more rows. */
-  function buildRows(cols, settings) {
-    if (cols.size === 0) return [];
-    const rows = [];
+  /** Turn one record's columns into rows. */
+  function buildRows(cols, settings, rules) {
+    if (cols.size === 0) return { rows: [], dropped: [] };
+    let rows = [];
     if (settings.matchMode === 'join') {
       const row = {};
       for (const [label, values] of cols) row[label] = values.join(', ');
@@ -264,9 +355,17 @@
         rows.push(row);
       }
     }
-    const req = requiredLabels(settings);
-    return rows.filter((r) => req.every((label) => r[label]));
+    const required = rules.filter((r) => r.required).map((r) => r.label);
+    const dropped = [];
+    rows = rows.filter((r) => {
+      const missing = required.filter((label) => !r[label]);
+      if (missing.length) dropped.push({ row: r, missing });
+      return !missing.length;
+    });
+    return { rows, dropped };
   }
+
+  const DEFAULT_REGEXES = BUILTIN_FIELDS.filter((f) => f.key !== 'hashtag').map(builtinRegex);
 
   /** Spreadsheet copies: every line has the same (>0) number of tabs. */
   function parseTable(text) {
@@ -280,11 +379,11 @@
     const looksLikeHeader =
       first.every((c) => c && !/^[\d\s.,$€£¥₹%+-]+$/.test(c)) &&
       new Set(first.map((c) => c.toLowerCase())).size === first.length &&
-      !first.some((c) => BUILTIN_FIELDS.some((f) => f.key !== 'hashtag' && scanRegex(f.regex, c).length));
+      !first.some((c) => DEFAULT_REGEXES.some((re) => scanRegex(re, c).length));
 
     const headers = looksLikeHeader ? first : first.map((_, i) => 'Column ' + (i + 1));
     const body = looksLikeHeader ? cells.slice(1) : cells;
-    return body
+    const rows = body
       .map((row) => {
         const obj = {};
         headers.forEach((h, i) => {
@@ -293,57 +392,129 @@
         return obj;
       })
       .filter((r) => Object.keys(r).length);
+    return {
+      rows,
+      reason:
+        `Spreadsheet copy detected: all ${lines.length} lines have ${tabs[0]} tab${tabs[0] === 1 ? '' : 's'}, ` +
+        (looksLikeHeader ? 'so the first line is used as column names.' : 'no header line, so columns are numbered.'),
+    };
   }
 
-  function splitRecords(text, settings) {
-    const nonEmpty = (arr) => arr.map((x) => x.trim()).filter(Boolean);
+  /** Split text into trimmed, non-empty pieces, keeping their offsets. */
+  function pieces(text, separator) {
+    const out = [];
+    const push = (s, e) => {
+      const raw = text.slice(s, e);
+      const t = raw.trim();
+      if (t) out.push({ text: t, offset: s + raw.length - raw.trimStart().length });
+    };
+    let last = 0;
+    separator.lastIndex = 0;
+    let m;
+    while ((m = separator.exec(text)) !== null) {
+      if (m[0] === '') {
+        separator.lastIndex++;
+        continue;
+      }
+      push(last, m.index);
+      last = m.index + m[0].length;
+    }
+    push(last, text.length);
+    return out;
+  }
+
+  const BLANK_LINES = /\n[ \t]*\n(?:[ \t]*\n)*/g;
+  const LINES = /\n/g;
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  function splitRecords(text, settings, rules) {
+    const whole = [{ text, offset: 0 }];
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
     switch (settings.splitMode) {
       case 'whole':
-        return [text];
-      case 'line':
-        return nonEmpty(text.split('\n'));
-      case 'blank':
-        return nonEmpty(text.split(/\n[ \t]*\n/));
+        return { mode: 'whole', records: whole, reason: 'Setting: the whole text is one record.' };
+      case 'line': {
+        const records = pieces(text, LINES);
+        return { mode: 'line', records, reason: `Setting: each line is a record (${plural(records.length, 'line')}).` };
+      }
+      case 'blank': {
+        const records = pieces(text, BLANK_LINES);
+        return { mode: 'blank', records, reason: `Setting: split at blank lines (${plural(records.length, 'block')}).` };
+      }
       case 'custom': {
-        const d = settings.delimiter || '\n';
-        return nonEmpty(text.split(d.replace(/\\n/g, '\n').replace(/\\t/g, '\t')));
+        const d = (settings.delimiter || '\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+        const records = pieces(text, new RegExp(escapeRegex(d), 'g'));
+        return { mode: 'custom', records, reason: `Setting: split at "${settings.delimiter}" (${plural(records.length, 'record')}).` };
       }
       default: {
-        // auto
-        const blocks = nonEmpty(text.split(/\n[ \t]*\n/));
-        if (blocks.length >= 2) return blocks;
-        const lines = nonEmpty(text.split('\n'));
-        if (lines.length < 2) return [text];
-        // Labeled records ("Name: ..." on separate lines) belong together.
-        if (settings.fields.kv.enabled && parseKeyValues(text).length >= 2) return [text];
-        const withData = lines.filter((l) => extractValues(l, settings).size > 0).length;
-        return withData >= 2 && withData >= lines.length / 2 ? lines : [text];
+        const blocks = pieces(text, BLANK_LINES);
+        if (blocks.length >= 2) {
+          return { mode: 'blank', records: blocks, reason: `Auto: the text has blank lines, so each of the ${blocks.length} blocks is a record.` };
+        }
+        const lines = pieces(text, LINES);
+        if (lines.length < 2) return { mode: 'whole', records: whole, reason: 'Auto: a single line, so the whole text is one record.' };
+        if (settings.fields.kv.enabled && parseKeyValues(text).length >= 2) {
+          return {
+            mode: 'whole',
+            records: whole,
+            reason: 'Auto: the text has "Key: Value" lines, so it is kept together as one record (repeated labels become separate rows).',
+          };
+        }
+        const withData = lines.filter((l) => extractRecord(l.text, 0, rules).cols.size > 0).length;
+        if (withData >= 2 && withData >= lines.length / 2) {
+          return { mode: 'line', records: lines, reason: `Auto: ${withData} of ${lines.length} lines contain data, so each line is a record.` };
+        }
+        return { mode: 'whole', records: whole, reason: `Auto: only ${withData} of ${lines.length} lines contain data, so the whole text is one record.` };
       }
     }
   }
 
-  function extract(text, settings) {
+  /** Full trace of how `text` is turned into rows. */
+  function explain(text, settings) {
     settings = normalizeSettings(settings);
     text = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
-    if (text.trim().length < Math.max(1, settings.minLength)) return [];
+    const result = { text, kind: 'text', mode: null, reason: '', records: [], rows: [], errors: [], duplicateRows: 0, ignored: null };
 
-    let rows = null;
-    if (settings.detectTables) rows = parseTable(text);
-    if (!rows) {
-      rows = [];
-      for (const record of splitRecords(text, settings)) {
-        rows.push(...buildRows(extractValues(record, settings), settings));
+    if (text.trim().length < Math.max(1, settings.minLength)) {
+      result.ignored = text.trim() ? `Text is shorter than the minimum of ${settings.minLength} characters.` : 'No text.';
+      return result;
+    }
+    const { rules, errors } = compileRules(settings);
+    result.errors = errors;
+    result.rules = rules.map(({ id, type, label, hue, required }) => ({ id, type, label, hue, required }));
+
+    let rows = [];
+    const table = settings.detectTables ? parseTable(text) : null;
+    if (table) {
+      result.kind = 'table';
+      result.reason = table.reason;
+      rows = table.rows;
+    } else {
+      const split = splitRecords(text, settings, rules);
+      result.mode = split.mode;
+      result.reason = split.reason;
+      for (const rec of split.records) {
+        const { cols, matches } = extractRecord(rec.text, rec.offset, rules);
+        const built = buildRows(cols, settings, rules);
+        result.records.push({ text: rec.text, offset: rec.offset, matches, rows: built.rows, dropped: built.dropped });
+        rows.push(...built.rows);
       }
     }
 
-    // Drop identical rows produced by the same clipboard.
+    // Drop identical rows produced by the same text.
     const seen = new Set();
-    return rows.filter((r) => {
+    result.rows = rows.filter((r) => {
       const k = rowKey(r);
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
     });
+    result.duplicateRows = rows.length - result.rows.length;
+    return result;
+  }
+
+  function extract(text, settings) {
+    return explain(text, settings).rows;
   }
 
   /** Stable identity for a row's data (used for de-duplication). */
@@ -355,15 +526,31 @@
     );
   }
 
+  /** Extraction-related part of the settings (what the admin panel edits). */
+  const RULE_KEYS = ['splitMode', 'delimiter', 'matchMode', 'repeatSingles', 'detectTables', 'dedupeRows', 'keepSource', 'minLength', 'fields', 'customFields'];
+  function rulesOf(settings) {
+    const s = normalizeSettings(settings);
+    const out = {};
+    for (const k of RULE_KEYS) out[k] = s[k];
+    return out;
+  }
+  const sameRules = (a, b) => JSON.stringify(rulesOf(a)) === JSON.stringify(rulesOf(b));
+
   const api = {
     BUILTIN_FIELDS,
     DISPLAY_ORDER,
     KV_FIELD,
+    CUSTOM_HUES,
     DEFAULT_SETTINGS,
+    RULE_KEYS,
     normalizeSettings,
     compileCustom,
+    compileRules,
+    explain,
     extract,
     rowKey,
+    rulesOf,
+    sameRules,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

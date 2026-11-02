@@ -109,3 +109,45 @@ test('scheme-like keys are not treated as labels', () => {
 test('rowKey ignores key order and case', () => {
   assert.equal(E.rowKey({ A: 'x', B: 'Y' }), E.rowKey({ b: 'y', a: 'X' }));
 });
+
+test('explain() reports how records were split and why matches were skipped', () => {
+  const text = 'Name: John\nEmail: john@acme.com\n\nName: Jane\nEmail: jane@x.io';
+  const r = E.explain(text);
+  assert.equal(r.kind, 'text');
+  assert.equal(r.mode, 'blank');
+  assert.equal(r.records.length, 2);
+  assert.equal(r.records[1].offset, text.indexOf('Name: Jane'));
+  const email = r.records[0].matches.filter((m) => m.label === 'Email');
+  assert.deepEqual(email.map((m) => m.status), ['skipped', 'used']); // "Email:" label is left to the Email rule
+  for (const rec of r.records) for (const m of rec.matches) assert.equal(text.slice(m.start, m.end), m.value);
+});
+
+test('explain() reports rejected matches and rows dropped by required fields', () => {
+  const r = E.explain('IP 192.168 and a@b.com', { fields: { phone: { enabled: true, required: true } } });
+  const phone = r.records[0].matches.find((m) => m.ruleId === 'phone');
+  assert.equal(phone.status, 'rejected');
+  assert.equal(r.rows.length, 0);
+  assert.deepEqual(r.records[0].dropped[0].missing, ['Phone']);
+});
+
+test('explain() describes spreadsheet copies', () => {
+  const r = E.explain('A\tB\n1\t2');
+  assert.equal(r.kind, 'table');
+  assert.match(r.reason, /Spreadsheet/);
+});
+
+test('built-in rules can be overridden: pattern, flags and column name', () => {
+  const settings = { fields: { email: { enabled: true, label: 'Work email', pattern: '[a-z]+@acme\\.com', flags: 'g' } } };
+  assert.deepEqual(E.extract('john@acme.com jane@other.org', settings), [{ 'Work email': 'john@acme.com' }]);
+});
+
+test('an invalid override falls back to the default pattern and reports an error', () => {
+  const r = E.explain('x@y.com', { fields: { email: { enabled: true, pattern: '(' } } });
+  assert.equal(r.errors.length, 1);
+  assert.deepEqual(r.rows, [{ Email: 'x@y.com' }]);
+});
+
+test('sameRules ignores non-rule settings', () => {
+  assert.ok(E.sameRules({ enabled: false, pollInterval: 5000 }, {}));
+  assert.ok(!E.sameRules({ matchMode: 'join' }, {}));
+});

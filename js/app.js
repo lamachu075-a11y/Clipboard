@@ -1,31 +1,20 @@
-/* Clipboard Extractor – web app UI and clipboard watcher. */
+/* Clipboard Extractor – main page: clipboard watcher, table, projects, downloads. */
 (function () {
   'use strict';
 
   const E = window.ClipExtractor;
   const Store = window.ClipStore;
-  const $ = (id) => document.getElementById(id);
-  const el = (tag, props = {}, children = []) => {
-    const n = Object.assign(document.createElement(tag), props);
-    n.append(...children);
-    return n;
-  };
+  const { $, el, toast, download, stamp, safeFileName, saveTextFile, pickTextFile } = window.UI;
+
+  const PROJECT_APP = 'clipboard-extractor';
 
   let rows = Store.getRows();
   let settings = Store.getSettings();
+  let project = Store.getProject();
+  let fileHandle = null; // where "Save" writes (Chrome/Edge); cleared on New project
   let sort = { col: '__time', dir: 'desc' };
   let filter = '';
   let knownIds = new Set(rows.map((r) => r.id)); // to highlight new rows
-
-  // ---------- helpers ----------
-
-  function toast(msg) {
-    const t = $('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => t.classList.remove('show'), 2400);
-  }
 
   function safely(fn) {
     try {
@@ -46,6 +35,11 @@
     return cols;
   }
 
+  function explainInAdmin(text) {
+    safely(() => Store.setDraft(text));
+    location.href = 'admin.html#test';
+  }
+
   // ---------- clipboard watcher ----------
   //
   // Browsers only let a page read the clipboard while it has focus, and
@@ -59,6 +53,7 @@
     lastText: Store.getLastText(),
     busy: false,
     timer: null,
+    interval: 0,
   };
 
   async function detectMode() {
@@ -82,29 +77,15 @@
   function renderStatus() {
     const on = settings.enabled;
     const { mode } = Watcher;
-    const st = $('status');
     let text;
     let kind;
-    if (mode === 'paste') {
-      text = 'Press Ctrl/⌘+V here to add';
-      kind = 'warn';
-    } else if (mode === 'denied') {
-      text = 'Clipboard blocked in site settings: press Ctrl/⌘+V instead';
-      kind = 'error';
-    } else if (mode === 'prompt') {
-      text = 'Needs permission';
-      kind = 'warn';
-    } else if (mode === 'checking') {
-      text = 'Starting…';
-      kind = 'warn';
-    } else if (!on) {
-      text = 'Paused';
-      kind = 'off';
-    } else {
-      text = document.hasFocus() ? 'Watching clipboard' : 'Watching: switch back to this tab after copying';
-      kind = 'ok';
-    }
-    st.dataset.kind = kind;
+    if (mode === 'paste') [text, kind] = ['Press Ctrl/⌘+V here to add', 'warn'];
+    else if (mode === 'denied') [text, kind] = ['Clipboard blocked in site settings: press Ctrl/⌘+V instead', 'error'];
+    else if (mode === 'prompt') [text, kind] = ['Needs permission', 'warn'];
+    else if (mode === 'checking') [text, kind] = ['Starting…', 'warn'];
+    else if (!on) [text, kind] = ['Paused', 'off'];
+    else [text, kind] = [document.hasFocus() ? 'Watching clipboard' : 'Watching: switch back to this tab after copying', 'ok'];
+    $('status').dataset.kind = kind;
     $('statusText').textContent = text;
     $('allow').hidden = mode !== 'prompt';
     $('enabled').closest('.switch').hidden = mode === 'paste' || mode === 'denied';
@@ -119,11 +100,10 @@
     Watcher.busy = true;
     try {
       const text = await navigator.clipboard.readText();
-      handleText(text, { force: manual, origin: 'clipboard' });
+      handleText(text, { force: manual });
       if (manual && Watcher.mode === 'prompt') setMode('auto');
     } catch (e) {
       if (e?.name === 'NotAllowedError') {
-        // Lost focus mid-read is harmless; a real denial is picked up by the permission status.
         if (manual) {
           setMode(await detectMode());
           if (Watcher.mode !== 'auto') toast('Clipboard access was not allowed. Press Ctrl/⌘+V to paste instead.');
@@ -137,7 +117,7 @@
   }
 
   /** Extract rows from text and add them to the table. */
-  function handleText(text, { force = false, origin = 'clipboard' } = {}) {
+  function handleText(text, { force = false } = {}) {
     text = String(text || '');
     if (!text.trim()) {
       if (force) toast('The clipboard has no text');
@@ -155,7 +135,7 @@
       toast(`Added ${added.length} row${added.length === 1 ? '' : 's'}`);
       flashTitle(added.length);
     } else if (force) {
-      toast(extracted.length ? 'Already in the table' : 'Nothing to extract from that text');
+      toast(extracted.length ? 'Already in the table' : 'Nothing to extract from that text. See the Admin panel to add a rule.');
     }
     return added;
   }
@@ -167,7 +147,9 @@
   }
 
   function startPolling() {
+    if (Watcher.interval === settings.pollInterval && Watcher.timer) return;
     clearInterval(Watcher.timer);
+    Watcher.interval = settings.pollInterval;
     Watcher.timer = setInterval(readClipboard, settings.pollInterval);
   }
 
@@ -180,12 +162,11 @@
 
   // Ctrl/⌘+V anywhere on the page (except in form fields) adds the pasted text.
   document.addEventListener('paste', (e) => {
-    const t = e.target;
-    if (t.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')) return;
     const text = e.clipboardData?.getData('text/plain');
     if (!text) return;
     e.preventDefault();
-    handleText(text, { force: true, origin: 'paste' });
+    handleText(text, { force: true });
   });
 
   $('allow').addEventListener('click', () => readClipboard(true));
@@ -232,8 +213,7 @@
   function render() {
     const list = visibleRows();
     const cols = columnsOf(rows);
-    const thead = $('table').tHead;
-    const tbody = $('table').tBodies[0];
+    const table = $('table');
 
     const th = (label, key) => {
       const h = el('th', { textContent: label });
@@ -247,7 +227,7 @@
       }
       return h;
     };
-    thead.replaceChildren(
+    table.tHead.replaceChildren(
       el('tr', {}, [
         th('#'),
         th('Captured', '__time'),
@@ -272,16 +252,23 @@
         tr.append(td);
       }
       if (settings.keepSource) tr.append(el('td', { className: 'source', textContent: r.source || '', title: r.source || '' }));
+      const actions = el('td', { className: 'actions' });
+      if (r.source) {
+        const why = el('button', { className: 'icon info', textContent: '?', title: 'Explain how this row was extracted', onclick: () => explainInAdmin(r.source) });
+        why.setAttribute('aria-label', 'Explain extraction');
+        actions.append(why);
+      }
       const del = el('button', { className: 'icon', textContent: '✕', title: 'Delete row', onclick: () => deleteRow(r.id) });
       del.setAttribute('aria-label', 'Delete row');
-      tr.append(el('td', {}, [del]));
+      actions.append(del);
+      tr.append(actions);
       frag.append(tr);
     });
-    tbody.replaceChildren(frag);
+    table.tBodies[0].replaceChildren(frag);
     knownIds = new Set(rows.map((r) => r.id));
 
     $('empty').hidden = rows.length > 0;
-    $('table').hidden = rows.length === 0;
+    table.hidden = rows.length === 0;
     const clips = new Set(rows.map((r) => r.clipId)).size;
     $('summary').textContent = rows.length
       ? `${list.length === rows.length ? rows.length : list.length + ' of ' + rows.length} rows · ${cols.length} columns · from ${clips} capture${clips === 1 ? '' : 's'}`
@@ -330,7 +317,207 @@
     safely(() => Store.setRows(rows));
   });
 
-  // ---------- export ----------
+  $('search').addEventListener('input', (e) => {
+    filter = e.target.value;
+    render();
+  });
+
+  $('clear').addEventListener('click', () => {
+    if (!rows.length) return;
+    if (!confirm(`Delete all ${rows.length} rows in "${project.name}"? This cannot be undone.`)) return;
+    rows = [];
+    safely(() => Store.setRows([]));
+    toast('Table cleared');
+  });
+
+  // ---------- projects ----------
+
+  function renderProject() {
+    if (document.activeElement !== $('projectName')) $('projectName').value = project.name;
+    $('projectName').style.width = Math.min(Math.max(project.name.length, 8), 32) + 2 + 'ch';
+    const st = $('saveState');
+    if (project.dirty) {
+      st.textContent = '● Unsaved';
+      st.className = 'save-state dirty';
+      st.title = 'This project has changes that are not saved to a file yet. Click Save (Ctrl/⌘+S).';
+    } else if (project.savedAt) {
+      st.textContent = 'Saved';
+      st.className = 'save-state saved';
+      st.title = `Saved ${new Date(project.savedAt).toLocaleString()}${project.fileName ? ' to ' + project.fileName : ''}`;
+    } else {
+      st.textContent = '';
+      st.className = 'save-state';
+    }
+  }
+
+  function updateProject(changes) {
+    project = Object.assign({}, project, changes);
+    safely(() => Store.setProject(project));
+    renderProject();
+  }
+
+  $('projectName').addEventListener('change', (e) => {
+    const name = e.target.value.trim() || 'Untitled project';
+    if (name !== project.name) updateProject({ name, dirty: true });
+    e.target.value = name;
+  });
+  $('projectName').addEventListener('keydown', (e) => e.key === 'Enter' && e.target.blur());
+
+  /** The whole project as one self-contained file: rows + the rules used. */
+  function projectFile() {
+    return {
+      app: PROJECT_APP,
+      type: 'project',
+      version: 2,
+      name: project.name,
+      createdAt: new Date(project.createdAt).toISOString(),
+      savedAt: new Date().toISOString(),
+      rules: E.rulesOf(settings),
+      rows,
+    };
+  }
+
+  /** Save to a file. Returns true when saved, false when cancelled. */
+  async function saveProject({ saveAs = false } = {}) {
+    let result;
+    try {
+      result = await saveTextFile({
+        suggestedName: safeFileName(project.name) + '.json',
+        text: JSON.stringify(projectFile(), null, 2),
+        handle: saveAs ? null : fileHandle,
+      });
+    } catch (e) {
+      toast('Could not save: ' + (e?.message || e));
+      return false;
+    }
+    if (!result) return false;
+    fileHandle = result.handle;
+    updateProject({ savedAt: Date.now(), fileName: result.fileName, dirty: false });
+    toast(result.handle ? `Saved to ${result.fileName}` : `Saved: downloaded ${result.fileName}`);
+    return true;
+  }
+
+  $('saveProject').addEventListener('click', () => saveProject());
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveProject({ saveAs: e.shiftKey });
+    }
+  });
+
+  function startNewProject(name) {
+    rows = [];
+    fileHandle = null;
+    safely(() => Store.setRows([], { dirty: false }));
+    project = { name, createdAt: Date.now(), savedAt: null, fileName: null, dirty: false };
+    safely(() => Store.setProject(project));
+    filter = '';
+    $('search').value = '';
+    renderProject();
+    render();
+    toast(`Started "${name}". Copy text to fill it.`);
+  }
+
+  const defaultProjectName = () =>
+    'Project ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+  $('newProject').addEventListener('click', () => {
+    const hasRows = rows.length > 0;
+    $('newName').value = defaultProjectName();
+    $('saveFirstWrap').hidden = !hasRows;
+    $('saveFirst').checked = hasRows && project.dirty;
+    $('saveFirstLabel').textContent = project.dirty
+      ? `Save "${project.name}" first (it has unsaved changes)`
+      : `Save "${project.name}" again first`;
+    $('newDialog').showModal();
+    $('newName').select();
+  });
+
+  $('newDialog').addEventListener('close', async () => {
+    if ($('newDialog').returnValue !== 'ok') return;
+    const name = $('newName').value.trim() || defaultProjectName();
+    if (!$('saveFirstWrap').hidden && $('saveFirst').checked) {
+      if (!(await saveProject())) return toast('Not saved, so no new project was started.');
+    } else if (rows.length && project.dirty && !confirm(`Discard the unsaved rows of "${project.name}"?`)) {
+      return;
+    }
+    startNewProject(name);
+  });
+
+  /** Read a project file (v1 or v2) or a "Table as JSON" download. */
+  function parseProject(obj, fileName) {
+    const toRow = (src, clipId) => {
+      const data = src.data && typeof src.data === 'object' ? src.data : src;
+      const clean = {};
+      const order = [];
+      for (const [k, v] of Object.entries(data)) {
+        if (k === 'capturedAt' && data === src) continue;
+        if (v == null || v === '' || typeof v === 'object') continue;
+        clean[String(k)] = String(v);
+        order.push(String(k));
+      }
+      const ts = typeof src.capturedAt === 'number' ? src.capturedAt : Date.parse(src.capturedAt);
+      return {
+        id: typeof src.id === 'string' && src.data ? src.id : Store.uid(),
+        clipId: (src.data && src.clipId) || clipId,
+        capturedAt: Number.isFinite(ts) ? ts : Date.now(),
+        data: clean,
+        cols: Array.isArray(src.cols) ? src.cols.filter((c) => c in clean) : order,
+        source: typeof src.source === 'string' ? src.source : '',
+      };
+    };
+    const baseName = String(fileName || '').replace(/\.json$/i, '') || 'Untitled project';
+
+    if (obj && obj.app === PROJECT_APP && Array.isArray(obj.rows)) {
+      const clip = Store.uid();
+      const created = Date.parse(obj.createdAt);
+      return {
+        name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : baseName,
+        createdAt: Number.isFinite(created) ? created : Date.now(),
+        rules: obj.rules || obj.settings || null,
+        rows: obj.rows.filter((r) => r && typeof r === 'object').map((r) => toRow(r, clip)),
+      };
+    }
+    if (Array.isArray(obj) && obj.every((x) => x && typeof x === 'object' && !Array.isArray(x))) {
+      const clip = Store.uid();
+      return { name: baseName, createdAt: Date.now(), rules: null, rows: obj.map((r) => toRow(r, clip)) };
+    }
+    throw new Error('This is not a Clipboard Extractor project file.');
+  }
+
+  $('openProject').addEventListener('click', async () => {
+    if (rows.length && project.dirty && !confirm(`"${project.name}" has unsaved changes that will be lost. Open another project anyway?`)) return;
+    const picked = await pickTextFile($('projectFile'));
+    if (!picked) return;
+    let p;
+    try {
+      p = parseProject(JSON.parse(picked.text), picked.name);
+    } catch (err) {
+      return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
+    }
+
+    if (p.rules && !E.sameRules(settings, p.rules)) {
+      const useTheirs = confirm(
+        `"${p.name}" was saved with different extraction rules.\n\n` +
+          `OK: use the project's rules (replaces the rules in the Admin panel)\nCancel: keep the current rules`
+      );
+      if (useTheirs) {
+        settings = E.normalizeSettings(Object.assign({}, settings, E.rulesOf(p.rules)));
+        safely(() => Store.saveSettings(settings));
+      }
+    }
+    rows = p.rows;
+    fileHandle = picked.handle;
+    knownIds = new Set();
+    safely(() => Store.setRows(rows, { dirty: false }));
+    project = { name: p.name, createdAt: p.createdAt, savedAt: Date.now(), fileName: picked.name, dirty: false };
+    safely(() => Store.setProject(project));
+    renderProject();
+    render();
+    toast(`Opened "${p.name}" (${rows.length} row${rows.length === 1 ? '' : 's'})`);
+  });
+
+  // ---------- downloads ----------
 
   function exportMatrix() {
     const list = visibleRows();
@@ -338,85 +525,17 @@
     return [['Captured', ...cols], ...list.map((r) => [new Date(r.capturedAt).toISOString(), ...cols.map((c) => r.data[c] ?? '')])];
   }
 
-  function download(name, type, content) {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    const a = el('a', { href: url, download: name });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-
-  const DOWNLOADS = {
-    csv() {
-      if (!rows.length) return toast('Nothing to download yet');
-      const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
-      const csv = exportMatrix()
-        .map((r) => r.map(esc).join(','))
-        .join('\r\n');
-      download(`clipboard-${stamp()}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
-    },
-
-    json() {
-      if (!rows.length) return toast('Nothing to download yet');
-      const data = visibleRows().map((r) => {
-        const o = { capturedAt: new Date(r.capturedAt).toISOString() };
-        for (const c of Store.columnsOf(r)) o[c] = r.data[c];
-        return o;
-      });
-      download(`clipboard-${stamp()}.json`, 'application/json', JSON.stringify(data, null, 2));
-    },
-
-    /** Everything needed to restore this workspace: all rows + settings. */
-    project() {
-      const project = {
-        app: PROJECT_APP,
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        settings,
-        rows,
-      };
-      download(`clipboard-project-${stamp()}.json`, 'application/json', JSON.stringify(project, null, 2));
-      toast(`Project saved (${rows.length} row${rows.length === 1 ? '' : 's'})`);
-    },
-
-    /** The app's own files, zipped, so it can be run or hosted anywhere. */
-    async app() {
-      toast('Preparing download…');
-      const files = [];
-      const missing = [];
-      for (const path of APP_FILES) {
-        try {
-          const res = await fetch(path, { cache: 'no-cache' });
-          if (!res.ok) throw new Error(res.status);
-          files.push({ name: 'clipboard-extractor/' + path, data: new Uint8Array(await res.arrayBuffer()) });
-        } catch {
-          missing.push(path);
-        }
-      }
-      if (!files.some((f) => f.name.endsWith('/index.html'))) {
-        return toast('Could not read the app files. Open the app from a web server (http/https) to download it.');
-      }
-      if (!files.some((f) => /README\.md$/.test(f.name))) {
-        files.push({ name: 'clipboard-extractor/README.txt', data: APP_README });
-      }
-      const zip = window.ClipZip.create(files);
-      download(`clipboard-extractor-app-${stamp()}.zip`, 'application/zip', zip);
-      toast(`Downloaded ${files.length} files`);
-    },
-  };
-
-  const PROJECT_APP = 'clipboard-extractor';
   const APP_FILES = [
     'index.html',
+    'admin.html',
     'manifest.webmanifest',
     'css/app.css',
     'js/extractor.js',
     'js/store.js',
+    'js/ui.js',
     'js/zip.js',
     'js/app.js',
+    'js/admin.js',
     'icons/icon16.png',
     'icons/icon32.png',
     'icons/icon48.png',
@@ -437,6 +556,54 @@
     '',
   ].join('\n');
 
+  const DOWNLOADS = {
+    csv() {
+      if (!rows.length) return toast('Nothing to download yet');
+      const esc = (v) => (/[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+      const csv = exportMatrix()
+        .map((r) => r.map(esc).join(','))
+        .join('\r\n');
+      download(`${safeFileName(project.name)}.csv`, 'text/csv;charset=utf-8', '﻿' + csv);
+    },
+
+    json() {
+      if (!rows.length) return toast('Nothing to download yet');
+      const data = visibleRows().map((r) => {
+        const o = { capturedAt: new Date(r.capturedAt).toISOString() };
+        for (const c of Store.columnsOf(r)) o[c] = r.data[c];
+        return o;
+      });
+      download(`${safeFileName(project.name)}-table.json`, 'application/json', JSON.stringify(data, null, 2));
+    },
+
+    saveAs() {
+      return saveProject({ saveAs: true });
+    },
+
+    /** The app's own files, zipped, so it can be run or hosted anywhere. */
+    async app() {
+      toast('Preparing download…');
+      const files = [];
+      for (const path of APP_FILES) {
+        try {
+          const res = await fetch(path, { cache: 'no-cache' });
+          if (!res.ok) continue;
+          files.push({ name: 'clipboard-extractor/' + path, data: new Uint8Array(await res.arrayBuffer()) });
+        } catch {
+          /* skip files that can't be read */
+        }
+      }
+      if (!files.some((f) => f.name.endsWith('/index.html'))) {
+        return toast('Could not read the app files. Open the app from a web server (http/https) to download it.');
+      }
+      if (!files.some((f) => /README\.md$/.test(f.name))) {
+        files.push({ name: 'clipboard-extractor/README.txt', data: APP_README });
+      }
+      download(`clipboard-extractor-app-${stamp()}.zip`, 'application/zip', window.ClipZip.create(files));
+      toast(`Downloaded ${files.length} files`);
+    },
+  };
+
   const menu = $('downloadMenu');
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-download]');
@@ -449,91 +616,6 @@
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && menu.open) menu.open = false;
-  });
-
-  // ---------- open project ----------
-
-  /** Accepts a project file, or a "Table as JSON" download (array of objects). */
-  function parseProject(obj) {
-    const toRow = (data, capturedAt, clipId, extra = {}) => {
-      const clean = {};
-      const cols = [];
-      for (const [k, v] of Object.entries(data || {})) {
-        if (v == null || v === '' || typeof v === 'object') continue;
-        clean[String(k)] = String(v);
-        cols.push(String(k));
-      }
-      const ts = Number.isFinite(capturedAt) ? capturedAt : Date.parse(capturedAt);
-      return {
-        id: Store.uid(),
-        clipId: clipId || Store.uid(),
-        capturedAt: Number.isFinite(ts) ? ts : Date.now(),
-        data: clean,
-        cols: Array.isArray(extra.cols) ? extra.cols.filter((c) => c in clean) : cols,
-        source: typeof extra.source === 'string' ? extra.source : '',
-      };
-    };
-
-    if (obj && obj.app === PROJECT_APP && Array.isArray(obj.rows)) {
-      return {
-        settings: obj.settings ? E.normalizeSettings(obj.settings) : null,
-        rows: obj.rows
-          .filter((r) => r && typeof r.data === 'object')
-          .map((r) => Object.assign(toRow(r.data, r.capturedAt, r.clipId, r), { id: typeof r.id === 'string' ? r.id : Store.uid() })),
-      };
-    }
-    if (Array.isArray(obj) && obj.every((x) => x && typeof x === 'object' && !Array.isArray(x))) {
-      const clipId = Store.uid();
-      return {
-        settings: null,
-        rows: obj.map(({ capturedAt, ...data }) => toRow(data, capturedAt, clipId)),
-      };
-    }
-    throw new Error('This is not a Clipboard Extractor project file.');
-  }
-
-  $('openProject').addEventListener('click', () => $('projectFile').click());
-  $('projectFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    e.target.value = '';
-    if (!file) return;
-    let project;
-    try {
-      project = parseProject(JSON.parse(await file.text()));
-    } catch (err) {
-      return toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message);
-    }
-    if (!project.rows.length && !project.settings) return toast('The file has no rows');
-
-    let replace = true;
-    if (rows.length) {
-      replace = confirm(
-        `Open "${file.name}" (${project.rows.length} rows)?\n\n` +
-          `OK: replace the current table (${rows.length} rows)\nCancel: add its rows to the current table`
-      );
-    }
-    let next;
-    if (replace) next = project.rows;
-    else {
-      const ids = new Set(rows.map((r) => r.id));
-      const keys = settings.dedupeRows ? new Set(rows.map((r) => E.rowKey(r.data))) : null;
-      next = rows.concat(
-        project.rows.filter((r) => !ids.has(r.id) && !(keys && keys.has(E.rowKey(r.data))))
-      );
-    }
-    const added = next.length - (replace ? 0 : rows.length);
-    if (project.settings && replace) {
-      settings = project.settings;
-      safely(() => Store.saveSettings(settings));
-      renderSettings();
-      renderStatus();
-      startPolling();
-    }
-    rows = next;
-    knownIds = new Set(); // highlight what was loaded
-    safely(() => Store.setRows(rows));
-    render();
-    toast(replace ? `Opened project: ${rows.length} rows` : `Added ${added} row${added === 1 ? '' : 's'} from the project`);
   });
 
   $('copyTsv').addEventListener('click', async () => {
@@ -550,19 +632,6 @@
     } catch {
       toast('Copy failed: your browser blocked clipboard writing');
     }
-  });
-
-  $('clear').addEventListener('click', () => {
-    if (!rows.length) return;
-    if (!confirm(`Delete all ${rows.length} rows? This cannot be undone.`)) return;
-    rows = [];
-    safely(() => Store.setRows([]));
-    toast('Table cleared');
-  });
-
-  $('search').addEventListener('input', (e) => {
-    filter = e.target.value;
-    render();
   });
 
   // ---------- manual input ----------
@@ -582,160 +651,25 @@
   }
   $('testInput').addEventListener('input', renderPreview);
   $('testAdd').addEventListener('click', () => {
-    if (!$('testInput').value.trim()) return;
-    handleText($('testInput').value, { force: true, origin: 'manual' });
+    if ($('testInput').value.trim()) handleText($('testInput').value, { force: true });
   });
+  $('testExplain').addEventListener('click', () => explainInAdmin($('testInput').value));
 
-  // ---------- settings ----------
-
-  function openSettings(open) {
-    $('settings').hidden = !open;
-    $('toggleSettings').setAttribute('aria-expanded', String(open));
-    if (open) history.replaceState(null, '', '#settings');
-    else history.replaceState(null, '', location.pathname + location.search);
-  }
-  $('toggleSettings').addEventListener('click', () => openSettings($('settings').hidden));
-  $('closeSettings').addEventListener('click', () => openSettings(false));
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('settings').hidden && !e.target.isContentEditable) openSettings(false);
-  });
-
-  let saveTimer = null;
-  function save() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      safely(() => Store.saveSettings(settings));
-      $('savedMsg').textContent = 'Saved';
-      setTimeout(() => ($('savedMsg').textContent = ''), 1200);
-    }, 250);
-    renderPreview();
-  }
-
-  function renderSettings() {
-    const tbody = $('builtinFields').tBodies[0];
-    const allFields = [...E.DISPLAY_ORDER.map((k) => E.BUILTIN_FIELDS.find((f) => f.key === k)), E.KV_FIELD];
-    tbody.replaceChildren(
-      ...allFields.map((f) => {
-        const cfg = settings.fields[f.key];
-        const box = (prop, disabled) => {
-          const i = el('input', { type: 'checkbox', checked: !!cfg[prop], disabled: !!disabled });
-          i.setAttribute('aria-label', `${f.label} ${prop}`);
-          i.addEventListener('change', () => {
-            cfg[prop] = i.checked;
-            if (prop === 'enabled' && !i.checked) cfg.required = false;
-            renderSettings();
-            save();
-          });
-          return i;
-        };
-        return el('tr', {}, [
-          el('td', { textContent: f.label }),
-          el('td', {}, [box('enabled')]),
-          el('td', {}, f.key === 'kv' ? [] : [box('required', !cfg.enabled)]),
-        ]);
-      })
-    );
-
-    $('customFields').replaceChildren(...settings.customFields.map(customEditor));
-
-    for (const id of ['splitMode', 'matchMode', 'delimiter', 'pollInterval', 'minLength']) $(id).value = settings[id];
-    for (const id of ['repeatSingles', 'detectTables', 'dedupeRows', 'keepSource']) $(id).checked = settings[id];
-    $('delimiterWrap').hidden = settings.splitMode !== 'custom';
-  }
-
-  function customEditor(cf) {
-    const err = el('div', { className: 'err', textContent: cf.pattern ? E.compileCustom(cf).error || '' : '' });
-    const input = (name, props) => {
-      const i = el('input', { type: 'text', name, value: cf[name] ?? '', ...props });
-      i.setAttribute('aria-label', props.placeholder);
-      i.addEventListener('input', () => {
-        cf[name] = name === 'group' ? Number(i.value) || 0 : i.value;
-        err.textContent = cf.pattern ? E.compileCustom(cf).error || '' : '';
-        save();
-      });
-      return i;
-    };
-    const check = (prop, label) => {
-      const i = el('input', { type: 'checkbox', checked: prop === 'enabled' ? cf.enabled !== false : !!cf[prop] });
-      i.addEventListener('change', () => {
-        cf[prop] = i.checked;
-        save();
-      });
-      return el('label', { className: 'check' }, [i, ' ' + label]);
-    };
-    return el('div', { className: 'custom' }, [
-      el('div', { className: 'line' }, [
-        input('name', { placeholder: 'Column name' }),
-        el('button', {
-          className: 'icon',
-          textContent: '✕',
-          title: 'Remove field',
-          onclick: () => {
-            settings.customFields = settings.customFields.filter((x) => x !== cf);
-            renderSettings();
-            save();
-          },
-        }),
-      ]),
-      input('pattern', { placeholder: 'Regular expression, e.g. INV-\\d+' }),
-      el('div', { className: 'line' }, [
-        input('flags', { placeholder: 'flags', title: 'Regex flags, e.g. i' }),
-        input('group', { placeholder: 'group', title: 'Capture group (0 = whole match)' }),
-        check('enabled', 'On'),
-        check('required', 'Required'),
-      ]),
-      err,
-    ]);
-  }
-
-  $('addCustom').addEventListener('click', () => {
-    settings.customFields.push({ id: Store.uid(), name: '', pattern: '', flags: 'i', group: 0, enabled: true, required: false });
-    renderSettings();
-    $('customFields').lastElementChild?.querySelector('input')?.focus();
-  });
-
-  for (const id of ['splitMode', 'matchMode', 'delimiter']) {
-    $(id).addEventListener('input', () => {
-      settings[id] = $(id).value;
-      $('delimiterWrap').hidden = settings.splitMode !== 'custom';
-      save();
-    });
-  }
-  for (const id of ['pollInterval', 'minLength']) {
-    $(id).addEventListener('change', () => {
-      settings[id] = Number($(id).value);
-      settings = E.normalizeSettings(settings);
-      $(id).value = settings[id];
-      if (id === 'pollInterval') startPolling();
-      save();
-    });
-  }
-  for (const id of ['repeatSingles', 'detectTables', 'dedupeRows', 'keepSource']) {
-    $(id).addEventListener('change', () => {
-      settings[id] = $(id).checked;
-      save();
-      render();
-    });
-  }
-  $('resetSettings').addEventListener('click', () => {
-    if (!confirm('Reset all settings (including custom fields) to defaults?')) return;
-    settings = E.normalizeSettings({ enabled: settings.enabled });
-    renderSettings();
-    startPolling();
-    save();
-  });
-
-  // ---------- live updates (this tab and other tabs) ----------
+  // ---------- live updates (this tab, other tabs, the admin panel) ----------
 
   Store.onChange((key) => {
     if (key === 'rows') {
       rows = Store.getRows();
       if (!document.activeElement?.isContentEditable) render();
-    } else if (key === 'settings' && !$('settings').contains(document.activeElement)) {
+    } else if (key === 'settings') {
       settings = Store.getSettings();
-      renderSettings();
       renderStatus();
+      startPolling();
+      renderPreview();
       render();
+    } else if (key === 'project') {
+      project = Store.getProject();
+      renderProject();
     } else if (key === 'lastText') {
       Watcher.lastText = Store.getLastText();
     }
@@ -743,10 +677,10 @@
 
   // ---------- start ----------
 
-  renderSettings();
+  safely(() => Store.setProject(project)); // remember the project (and its creation time) on first run
+  renderProject();
   render();
   renderStatus();
-  if (location.hash === '#settings') openSettings(true);
   detectMode().then((mode) => {
     setMode(mode);
     startPolling();
