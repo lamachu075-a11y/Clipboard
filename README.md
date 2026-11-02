@@ -7,6 +7,14 @@ every line of a spreadsheet, every email in a paragraph.
 Built with **Next.js 16** (App Router), **React 19** and **TypeScript** (strict mode). It is exported as a static site (no server
 code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in your browser.
 
+## Demo (Android)
+
+[![Clipboard Extractor on an Android phone: tap to play the video](docs/demo/android-demo-poster.png)](docs/demo/android-demo.mp4)
+
+[▶ Watch the Android demo (MP4, 1½ min)](docs/demo/android-demo.mp4). It is recorded on an emulated Pixel 7 in Chrome
+and shows choosing the columns, copying WhatsApp recharge messages, the rows grouped by platform with totals,
+remarks, the Table / Cards switch, Stop / Start auto-read, the PDF report and saving the project.
+
 ## Features
 
 ### Capture and extract
