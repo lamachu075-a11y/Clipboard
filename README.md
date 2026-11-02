@@ -67,6 +67,10 @@ code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in y
   with a subtotal of *Credit* (or *Amount* / *Total*), plus a grand total. **Group by** and **Total**
   above the table pick other columns or turn this off. Chips show each platform's rows and total;
   click one to show only that platform (downloads then contain only that platform).
+- **Remarks:** click **＋ Remark** on any row (or the remark itself) to write your own note, e.g. *paid*,
+  *pending*, *refund*. Remarks you've used before are suggested as you type. They are searchable,
+  sortable, saved with the project, and included in the PDF, CSV, JSON and Copy. They are kept apart
+  from the extracted data, so they don't affect duplicates, grouping or totals.
 - **PDF report:** a summary per platform, then all platforms together with the grand total, then one
   table per platform with its own total.
 - **Phones:** a **Table / Cards** switch. The table shows the data columns (e.g. Date, Platform, Credit)

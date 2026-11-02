@@ -17,10 +17,17 @@ export const sortedRows = (list: Row[]): Row[] =>
     .sort((a, b) => a[0].capturedAt - b[0].capturedAt || a[1] - b[1])
     .map(([r]) => r);
 
-/** [header, ...rows] with a "Captured" column first. */
+/** True when any row has a remark (exports then get a Remarks column). */
+export const hasRemarks = (list: Row[]): boolean => list.some((r) => !!r.remark);
+
+/** [header, ...rows] with a "Captured" column first, and "Remarks" last when there are any. */
 export function matrixOf(list: Row[]): string[][] {
   const cols = columnsOf(list);
-  return [['Captured', ...cols], ...list.map((r) => [new Date(r.capturedAt).toISOString(), ...cols.map((c) => r.data[c] ?? '')])];
+  const remarks = hasRemarks(list);
+  return [
+    ['Captured', ...cols, ...(remarks ? ['Remarks'] : [])],
+    ...list.map((r) => [new Date(r.capturedAt).toISOString(), ...cols.map((c) => r.data[c] ?? ''), ...(remarks ? [r.remark || ''] : [])]),
+  ];
 }
 
 export function csvOf(list: Row[]): string {
@@ -38,6 +45,7 @@ export function jsonOf(list: Row[]): string {
     list.map((r) => {
       const o: Record<string, string> = { capturedAt: new Date(r.capturedAt).toISOString() };
       for (const c of columnsOfRow(r)) o[c] = r.data[c];
+      if (r.remark) o.remarks = r.remark;
       return o;
     }),
     null,
@@ -58,10 +66,12 @@ export function pdfOf(
   { groupBy = '', sumBy = '' }: { groupBy?: string; sumBy?: string } = {}
 ): { bytes: Uint8Array<ArrayBuffer>; unsupported: string[] } {
   const cols = columnsOf(list);
-  const columns = ['#', 'Captured', ...cols];
-  const toRows = (rows: Row[]): string[][] => rows.map((r, i) => [String(i + 1), fmtTime(r.capturedAt), ...cols.map((c) => r.data[c] ?? '')]);
+  const remarks = hasRemarks(list);
+  const columns = ['#', 'Captured', ...cols, ...(remarks ? ['Remarks'] : [])];
+  const toRows = (rows: Row[]): string[][] =>
+    rows.map((r, i) => [String(i + 1), fmtTime(r.capturedAt), ...cols.map((c) => r.data[c] ?? ''), ...(remarks ? [r.remark || ''] : [])]);
   const totalRow = (label: string, total: number): string[] | undefined =>
-    sumBy ? ['', label, ...cols.map((c) => (c === sumBy ? formatNumber(total) : ''))] : undefined;
+    sumBy ? ['', label, ...cols.map((c) => (c === sumBy ? formatNumber(total) : '')), ...(remarks ? [''] : [])] : undefined;
 
   const s = summarize(list, groupBy, sumBy);
   const grouped = groupBy && s.groups.length >= 2;
@@ -153,7 +163,7 @@ export function parseProject(input: unknown, fileName?: string): ParsedProject {
     const clean: Record<string, string> = {};
     const order: string[] = [];
     for (const [k, v] of Object.entries(data)) {
-      if (k === 'capturedAt' && data === src) continue;
+      if ((k === 'capturedAt' || k === 'remarks') && data === src) continue;
       if (v == null || v === '' || typeof v === 'object') continue;
       clean[String(k)] = String(v);
       order.push(String(k));
@@ -166,6 +176,7 @@ export function parseProject(input: unknown, fileName?: string): ParsedProject {
       data: clean,
       cols: Array.isArray(src.cols) ? (src.cols as string[]).filter((c) => c in clean) : order,
       source: typeof src.source === 'string' ? src.source : '',
+      ...(typeof src.remark === 'string' && src.remark ? { remark: src.remark } : typeof src.remarks === 'string' && src.remarks ? { remark: src.remarks } : {}),
     };
   };
   const baseName = String(fileName || '').replace(/\.json$/i, '') || 'Untitled project';

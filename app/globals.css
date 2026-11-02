@@ -575,3 +575,44 @@ button.autoread-start:hover { background: color-mix(in srgb, var(--ok) 10%, var(
   .table-wrap.cards #table tr.subtotal td.total-label, .table-wrap.cards #table tr.grand-total td.total-label { font-size: 14px; padding: 0 0 2px; }
   .table-wrap.cards #table tfoot { display: block; }
 }
+
+/* ===== remarks ===== */
+#table td.remark { min-width: 7em; max-width: 260px; }
+#table td.remark button { border: 0; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 4px; text-align: left; font: inherit; }
+#table td.remark .remark-text { color: var(--text); overflow-wrap: anywhere; cursor: text; }
+#table td.remark .remark-text:hover { background: var(--surface-2); }
+#table td.remark .remark-add { color: var(--muted); opacity: .55; font-size: 12.5px; white-space: nowrap; }
+#table tr:hover td.remark .remark-add, #table td.remark .remark-add:focus-visible { opacity: 1; }
+#table td.remark .remark-add:hover { color: var(--accent); background: var(--surface-2); }
+#table td.remark.editing { padding: 3px 4px; }
+#table td.remark.editing input { width: 100%; min-width: 10em; padding: 4px 6px; }
+#table th.remark-col { min-width: 7em; }
+
+@media print {
+  #table td.remark .remark-add { display: none; }
+}
+
+@media (max-width: 700px) {
+  .table-wrap.as-table #table td.remark { min-width: 0; max-width: 120px; }
+  .table-wrap.as-table #table td.remark .remark-add span { display: none; }
+  .table-wrap.as-table #table td.remark .remark-add { opacity: .8; font-size: 15px; }
+  .table-wrap.as-table #table td.remark .remark-text { display: block; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .table-wrap.cards #table td.remark { display: grid; grid-template-columns: minmax(84px, 34%) minmax(0, 1fr); gap: 10px; max-width: none; font-size: 15px; }
+  .table-wrap.cards #table td.remark::before { content: attr(data-label); color: var(--muted); font-size: 13px; }
+  .table-wrap.cards #table td.remark .remark-add { opacity: 1; justify-self: start; font-size: 14px; }
+  .table-wrap.cards #table tr.subtotal td.remark, .table-wrap.cards #table tr.grand-total td.remark { display: none; }
+}
+@media (max-width: 700px) {
+  /* phone table: let values wrap so Date / Platform / Credit / Remarks fit the screen */
+  .table-wrap.as-table #table th, .table-wrap.as-table #table td { padding: 7px 6px; }
+  .table-wrap.as-table #table td.cell { white-space: normal; overflow-wrap: anywhere; max-width: 110px; }
+  .table-wrap.as-table #table td.remark { max-width: 84px; }
+  .table-wrap.as-table #table td.remark .remark-text { max-width: 84px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .table-wrap.as-table #table td.actions .info { display: none; }
+  .table-wrap.as-table #table td.actions button { padding: 4px; }
+}
+@media (max-width: 370px) {
+  .table-wrap.as-table #table { font-size: 12.5px; }
+  .table-wrap.as-table #table th, .table-wrap.as-table #table td { padding: 6px 4px; }
+}

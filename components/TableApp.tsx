@@ -11,6 +11,7 @@ import { csvOf, fileOf, jsonOf, parseProject, pdfOf, sortedRows, tsvOf } from '.
 import { formatNumber, numericColumns, resolveGroupBy, resolveSumBy, summarize } from '../lib/summary.ts';
 import { Modal, ToastProvider, useDismiss, useIsTouch, useStored, useToast } from './common.tsx';
 import DataTable from './DataTable.tsx';
+import { REMARK } from './DataTable.tsx';
 import type { SortState } from './DataTable.tsx';
 
 /** How the clipboard can be read in this browser. */
@@ -376,14 +377,20 @@ function TablePage() {
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const list = q
-      ? rows.filter((r) => Object.values(r.data).some((v) => String(v).toLowerCase().includes(q)) || (r.source || '').toLowerCase().includes(q))
+      ? rows.filter(
+          (r) =>
+            Object.values(r.data).some((v) => String(v).toLowerCase().includes(q)) ||
+            (r.remark || '').toLowerCase().includes(q) ||
+            (r.source || '').toLowerCase().includes(q)
+        )
       : rows.slice();
     const dir = sort.dir === 'asc' ? 1 : -1;
     const idx = new Map(rows.map((r, i) => [r.id, i]));
     list.sort((a, b) => {
       // Newest capture first by default, but rows of one capture stay in clipboard order.
       if (sort.col === '__time') return (a.capturedAt - b.capturedAt) * dir || (idx.get(a.id) ?? 0) - (idx.get(b.id) ?? 0);
-      return String(a.data[sort.col] ?? '').localeCompare(String(b.data[sort.col] ?? ''), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      const value = (r: Row): string => (sort.col === REMARK ? r.remark || '' : String(r.data[sort.col] ?? ''));
+      return value(a).localeCompare(value(b), undefined, { numeric: true, sensitivity: 'base' }) * dir;
     });
     return list;
   }, [rows, filter, sort]);
@@ -414,6 +421,24 @@ function TablePage() {
     });
     safely(() => Store.setRows(next));
   };
+  const onRemark = (id: string, remark: string) =>
+    safely(() =>
+      Store.setRows(
+        Store.getRows().map((r) => {
+          if (r.id !== id) return r;
+          const next = { ...r };
+          if (remark) next.remark = remark;
+          else delete next.remark;
+          return next;
+        })
+      )
+    );
+  /** Remarks already used, most used first (offered while typing). */
+  const remarkOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) if (r.remark) counts.set(r.remark, (counts.get(r.remark) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([text]) => text);
+  }, [rows]);
   const onDelete = (id: string) => safely(() => Store.setRows(Store.getRows().filter((r) => r.id !== id)));
   const explainInAdmin = (text: string) => {
     safely(() => Store.setDraft(text));
@@ -823,6 +848,8 @@ function TablePage() {
               onEdit={onEdit}
               onDelete={onDelete}
               onExplain={explainInAdmin}
+              onRemark={onRemark}
+              remarkOptions={remarkOptions}
               highlightToken={highlightToken}
             />
           ) : (

@@ -95,6 +95,8 @@ export interface Row {
   /** Column order (storage does not keep object key order). */
   cols?: string[];
   source: string;
+  /** Your own note on this row (not extracted; not part of duplicate checks). */
+  remark?: string;
 }
 
 /** Table view choices (per browser). groupBy / sumBy: a column name, '' for none, or 'auto'. */

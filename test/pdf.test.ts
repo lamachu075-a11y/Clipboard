@@ -90,3 +90,15 @@ test('report without grouping: one table with a total row', async (t) => {
   assert.ok(out.includes('Total (2 rows)') && out.includes('30'));
   assert.ok(!out.includes('Summary by'));
 });
+
+test('report shows remarks in their own column', async (t) => {
+  const { pdfOf } = await import('../lib/projectio.ts');
+  const rows = [
+    { id: '1', clipId: 'c', capturedAt: 1, data: { Platform: 'os', Credit: '10' }, source: '', remark: 'paid in cash' },
+    { id: '2', clipId: 'c', capturedAt: 2, data: { Platform: 'ios', Credit: '5' }, source: '' },
+  ];
+  const out = pdfText(pdfOf('R', rows, { groupBy: 'Platform', sumBy: 'Credit' }).bytes, t);
+  if (!out) return;
+  assert.ok(out.includes('Remarks'));
+  assert.ok(out.includes('paid in cash'));
+});

@@ -37,6 +37,10 @@ interface DataTableProps {
   onEdit: (id: string, col: string, value: string) => void;
   onDelete: (id: string) => void;
   onExplain: (source: string) => void;
+  /** Set (or clear, with '') a row's remark. */
+  onRemark: (id: string, remark: string) => void;
+  /** Remarks used before, offered while typing. */
+  remarkOptions: string[];
   /** Change it to highlight every row (e.g. after opening a project). */
   highlightToken: number;
   /** Column the rows are grouped by ('' for none) and its groups. */
@@ -49,11 +53,69 @@ interface DataTableProps {
 
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
 
+/** Sort key and editing key for the Remarks column. */
+export const REMARK = '__remark';
+
+/** A row's remark: shown as text, or a "+ Remark" button; click to type. */
+function RemarkCell({ remark, editing, onStart, onDone }: { remark: string; editing: boolean; onStart: () => void; onDone: (value: string | null) => void }) {
+  if (editing) {
+    return (
+      <td className="remark editing" data-label="Remarks">
+        <input
+          autoFocus
+          list="remarkOptions"
+          defaultValue={remark}
+          maxLength={500}
+          placeholder="e.g. paid, pending, refund"
+          aria-label="Remark"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') {
+              e.currentTarget.dataset.cancel = '1';
+              e.currentTarget.blur();
+            }
+          }}
+          onBlur={(e) => onDone(e.currentTarget.dataset.cancel ? null : e.currentTarget.value.trim())}
+        />
+      </td>
+    );
+  }
+  return (
+    <td className={'remark' + (remark ? ' has-remark' : '')} data-label="Remarks">
+      {remark ? (
+        <button className="remark-text" title="Edit remark" onClick={onStart}>
+          {remark}
+        </button>
+      ) : (
+        <button className="remark-add" title="Add a remark to this row" aria-label="Add remark" onClick={onStart}>
+          ＋ <span>Remark</span>
+        </button>
+      )}
+    </td>
+  );
+}
+
 /**
  * The rows table: one section per group (e.g. per platform) with subtotals, and a grand
  * total. On phones the same markup can be shown as cards (see globals.css).
  */
-export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit, onDelete, onExplain, highlightToken, groupBy, groups, sumBy, total }: DataTableProps) {
+export default function DataTable({
+  rows,
+  list,
+  keepSource,
+  sort,
+  onSort,
+  onEdit,
+  onDelete,
+  onExplain,
+  onRemark,
+  remarkOptions,
+  highlightToken,
+  groupBy,
+  groups,
+  sumBy,
+  total,
+}: DataTableProps) {
   const cols = columnsOf(rows);
   const [editing, setEditing] = useState<{ id: string; col: string } | null>(null);
   // Rows not seen in the previous render get a short highlight.
@@ -139,6 +201,15 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
               </td>
             );
           })}
+          <RemarkCell
+            remark={r.remark || ''}
+            editing={!!editing && editing.id === r.id && editing.col === REMARK}
+            onStart={() => setEditing({ id: r.id, col: REMARK })}
+            onDone={(value) => {
+              if (value !== null && value !== (r.remark || '')) onRemark(r.id, value);
+              setEditing(null);
+            }}
+          />
           {keepSource ? (
             <td className="source" data-label="Source" title={r.source || ''}>
               {r.source || ''}
@@ -158,7 +229,7 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
     );
   };
 
-  const span = 3 + cols.length + (keepSource ? 1 : 0);
+  const span = 4 + cols.length + (keepSource ? 1 : 0);
   const totalRow = (label: string, value: number, className: string) => (
     <tr className={className}>
       <td className="meta num" />
@@ -174,6 +245,7 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
           {c === sumBy ? formatNumber(value) : ''}
         </td>
       ))}
+      <td className="remark no-total" />
       {keepSource ? <td className="source" /> : null}
       <td className="actions" />
     </tr>
@@ -181,6 +253,12 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
   const grouped = !!groupBy && groups.length > 0;
 
   return (
+    <>
+      <datalist id="remarkOptions">
+        {remarkOptions.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
     <table id="table">
       <thead>
         <tr>
@@ -193,6 +271,9 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
               {c}
             </th>
           ))}
+          <th className="remark-col" data-sort={sort.col === REMARK ? sort.dir : undefined} onClick={() => onSort(REMARK)}>
+            Remarks
+          </th>
           {keepSource ? th('Source text', null, 'source-col') : null}
           {th('')}
         </tr>
@@ -220,5 +301,6 @@ export default function DataTable({ rows, list, keepSource, sort, onSort, onEdit
       )}
       {sumBy ? <tfoot>{totalRow(grouped ? `All (${plural(list.length, 'row')})` : `Total (${plural(list.length, 'row')})`, total, 'grand-total')}</tfoot> : null}
     </table>
+    </>
   );
 }
