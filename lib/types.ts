@@ -97,6 +97,14 @@ export interface Row {
   source: string;
 }
 
+/** Table view choices (per browser). groupBy / sumBy: a column name, '' for none, or 'auto'. */
+export interface ViewPrefs {
+  groupBy: string;
+  sumBy: string;
+  /** Phone layout: rows as a table or as cards. */
+  mobileView: 'table' | 'cards';
+}
+
 /** The project being worked on. */
 export interface Project {
   id: string | null;

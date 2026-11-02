@@ -129,8 +129,32 @@ export interface TableOptions {
   footer?: string;
 }
 
+/** One table in a report, with an optional heading and total row. */
+export interface ReportSection {
+  heading?: string;
+  /** Small grey text under the heading. */
+  note?: string;
+  columns: string[];
+  rows: string[][];
+  /** A bold, shaded last row (e.g. totals). */
+  totalRow?: string[];
+}
+
+export interface ReportOptions {
+  title: string;
+  subtitle?: string;
+  sections: ReportSection[];
+  landscape?: boolean;
+  footer?: string;
+}
+
 /** Build a PDF with a title and a table that flows over as many pages as needed. */
 function table({ title, subtitle = '', columns, rows, landscape = true, footer = '' }: TableOptions): Uint8Array<ArrayBuffer> {
+  return report({ title, subtitle, landscape, footer, sections: [{ columns, rows }] });
+}
+
+/** Build a PDF with a title and several tables (each with a heading and optional total row). */
+function report({ title, subtitle = '', sections, landscape = true, footer = '' }: ReportOptions): Uint8Array<ArrayBuffer> {
   const pageW = landscape ? 842 : 595;
   const pageH = landscape ? 595 : 842;
   const margin = 36;
@@ -141,16 +165,7 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   const padY = 4;
   const maxLines = 6;
   const usable = pageW - margin * 2;
-
-  // Column widths: natural width (capped), scaled to fill the page.
-  const natural = columns.map((c, i) => {
-    let w = textWidth(String(c), headSize, true);
-    for (const r of rows.slice(0, 500)) w = Math.max(w, textWidth(String(r[i] ?? ''), size, false));
-    return Math.min(Math.max(w + padX * 2, 30), 260);
-  });
-  const total = natural.reduce((a, b) => a + b, 0);
-  let widths = natural.map((w) => (w / total) * usable);
-  if (total < usable) widths = natural.map((w) => w + (usable - total) / natural.length);
+  const bottom = margin + 18;
 
   const pages: string[][] = [];
   let ops: string[] = [];
@@ -160,51 +175,91 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   const rect = (x: number, yy: number, w: number, h: number, gray: number): number => ops.push(`${num(gray)} g ${num(x)} ${num(yy)} ${num(w)} ${num(h)} re f 0 g`);
   const line = (x1: number, y1: number, x2: number, y2: number): number => ops.push(`0.82 G 0.5 w ${num(x1)} ${num(y1)} m ${num(x2)} ${num(y2)} l S`);
 
-  function headerRow(): void {
-    const cells = columns.map((c, i) => wrap(String(c), widths[i] - padX * 2, headSize, true, 2));
-    const h = Math.max(...cells.map((l) => l.length)) * lineH + padY * 2;
-    rect(margin, y - h, usable, h, 0.92);
-    let x = margin;
-    cells.forEach((lines, i) => {
-      lines.forEach((l, j) => text(l, x + padX, y - padY - size - j * lineH + 1, true, headSize));
-      x += widths[i];
-    });
-    line(margin, y - h, margin + usable, y - h);
-    y -= h;
-  }
-
-  function newPage(first: boolean): void {
+  function newPage(): void {
     if (ops.length) pages.push(ops);
     ops = [];
     y = pageH - margin;
-    if (first) {
-      text(truncate(String(title), usable, 16, true), margin, y - 16, true, 16);
-      y -= 22;
-      if (subtitle) {
-        ops.push('0.4 g');
-        text(truncate(String(subtitle), usable, 9, false), margin, y - 10, false, 9);
-        ops.push('0 g');
-        y -= 18;
-      }
-      y -= 6;
-    }
-    headerRow();
   }
 
-  newPage(true);
-  if (!rows.length) text('No rows.', margin, y - 18, false, 10);
-  rows.forEach((r, ri) => {
-    const cells = columns.map((_, i) => wrap(String(r[i] ?? ''), widths[i] - padX * 2, size, false, maxLines));
-    const h = Math.max(1, ...cells.map((l) => l.length)) * lineH + padY * 2;
-    if (y - h < margin + 18) newPage(false);
-    if (ri % 2 === 1) rect(margin, y - h, usable, h, 0.97);
-    let x = margin;
-    cells.forEach((lines, i) => {
-      lines.forEach((l, j) => l && text(l, x + padX, y - padY - size - j * lineH + 1, false));
-      x += widths[i];
+  newPage();
+  text(truncate(String(title), usable, 16, true), margin, y - 16, true, 16);
+  y -= 22;
+  if (subtitle) {
+    ops.push('0.4 g');
+    text(truncate(String(subtitle), usable, 9, false), margin, y - 10, false, 9);
+    ops.push('0 g');
+    y -= 18;
+  }
+
+  sections.forEach((sec, si) => {
+    const { columns, rows } = sec;
+    const all = sec.totalRow ? [...rows, sec.totalRow] : rows;
+
+    // Column widths: natural width (capped), scaled to fill the page.
+    const natural = columns.map((c, i) => {
+      let w = textWidth(String(c), headSize, true);
+      for (const r of all.slice(0, 500)) w = Math.max(w, textWidth(String(r[i] ?? ''), size, sec.totalRow === r));
+      return Math.min(Math.max(w + padX * 2, 30), 260);
     });
-    line(margin, y - h, margin + usable, y - h);
-    y -= h;
+    const sum = natural.reduce((a, b) => a + b, 0);
+    // Fill the page width in proportion to each column's content (keeps "#" narrow).
+    const widths = natural.map((w) => (w / sum) * usable);
+
+    const cellsOf = (r: string[], bold: boolean): string[][] => columns.map((_, i) => wrap(String(r[i] ?? ''), widths[i] - padX * 2, size, bold, maxLines));
+    const heightOf = (cells: string[][]): number => Math.max(1, ...cells.map((l) => l.length)) * lineH + padY * 2;
+
+    function headerRow(): void {
+      const cells = columns.map((c, i) => wrap(String(c), widths[i] - padX * 2, headSize, true, 2));
+      const h = Math.max(...cells.map((l) => l.length)) * lineH + padY * 2;
+      rect(margin, y - h, usable, h, 0.92);
+      let x = margin;
+      cells.forEach((lines, i) => {
+        lines.forEach((l, j) => text(l, x + padX, y - padY - size - j * lineH + 1, true, headSize));
+        x += widths[i];
+      });
+      line(margin, y - h, margin + usable, y - h);
+      y -= h;
+    }
+
+    // Heading, then the header row; keep them on the same page as the first row.
+    const headingH = (sec.heading ? 20 : 0) + (sec.note ? 13 : 0) + (si > 0 || sec.heading ? 10 : 6);
+    const firstRowH = all.length ? heightOf(cellsOf(all[0], false)) : lineH + padY * 2;
+    if (y - headingH - (lineH + padY * 2) - firstRowH < bottom) newPage();
+    y -= si > 0 || sec.heading ? 10 : 6;
+    if (sec.heading) {
+      text(truncate(sec.heading, usable, 12, true), margin, y - 12, true, 12);
+      y -= 20;
+    }
+    if (sec.note) {
+      ops.push('0.4 g');
+      text(truncate(sec.note, usable, 8.5, false), margin, y - 6, false, 8.5);
+      ops.push('0 g');
+      y -= 13;
+    }
+    headerRow();
+
+    if (!all.length) {
+      text('No rows.', margin + padX, y - padY - size, false, size);
+      y -= lineH + padY * 2;
+    }
+    all.forEach((r, ri) => {
+      const isTotal = sec.totalRow === r;
+      const cells = cellsOf(r, isTotal);
+      const h = heightOf(cells);
+      if (y - h < bottom) {
+        newPage();
+        headerRow();
+      }
+      if (isTotal) rect(margin, y - h, usable, h, 0.88);
+      else if (ri % 2 === 1) rect(margin, y - h, usable, h, 0.97);
+      let x = margin;
+      cells.forEach((lines, i) => {
+        lines.forEach((l, j) => l && text(l, x + padX, y - padY - size - j * lineH + 1, isTotal));
+        x += widths[i];
+      });
+      line(margin, y - h, margin + usable, y - h);
+      y -= h;
+    });
   });
   pages.push(ops);
 
@@ -254,7 +309,7 @@ function table({ title, subtitle = '', columns, rows, landscape = true, footer =
   return bytes;
 }
 
-const api = { table, unsupported, textWidth };
+const api = { table, report, unsupported, textWidth };
 
-export { table, unsupported, textWidth };
+export { table, report, unsupported, textWidth };
 export default api;

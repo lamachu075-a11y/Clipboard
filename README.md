@@ -63,6 +63,14 @@ code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in y
 
 ### Table and downloads
 - Sort, filter, double-click a cell to edit, delete rows. Rows from the same copy are shaded as a group.
+- **Group by and totals:** with a *Platform* column, rows are grouped per platform automatically, each
+  with a subtotal of *Credit* (or *Amount* / *Total*), plus a grand total. **Group by** and **Total**
+  above the table pick other columns or turn this off. Chips show each platform's rows and total;
+  click one to show only that platform (downloads then contain only that platform).
+- **PDF report:** a summary per platform, then all platforms together with the grand total, then one
+  table per platform with its own total.
+- **Phones:** a **Table / Cards** switch. The table shows the data columns (e.g. Date, Platform, Credit)
+  with subtotals; cards show one row per card.
 - **Download** menu:
   - **Table as PDF**: a PDF file, landscape, with the project name, page numbers and a header row repeated on every page.
   - **Table as CSV** (Excel) or **JSON**.

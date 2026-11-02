@@ -2,6 +2,8 @@
 import { columnsOf, columnsOfRow, uid } from './store.ts';
 import Pdf from './pdf.ts';
 import type { ProjectDoc, Row, Rules, SettingsInput } from './types.ts';
+import { formatNumber, summarize } from './summary.ts';
+import type { ReportSection } from './pdf.ts';
 
 export const PROJECT_APP = 'clipboard-extractor' as const;
 
@@ -43,18 +45,69 @@ export function jsonOf(list: Row[]): string {
   );
 }
 
-/** PDF bytes for a table, plus characters the PDF fonts can't show. */
-export function pdfOf(name: string, list: Row[]): { bytes: Uint8Array<ArrayBuffer>; unsupported: string[] } {
+const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/**
+ * PDF report for a table, plus characters the PDF fonts can't show.
+ * With `groupBy` (e.g. Platform) and two or more groups: a summary per group, the
+ * table of all rows, then one table per group. With `sumBy` (e.g. Credit): totals.
+ */
+export function pdfOf(
+  name: string,
+  list: Row[],
+  { groupBy = '', sumBy = '' }: { groupBy?: string; sumBy?: string } = {}
+): { bytes: Uint8Array<ArrayBuffer>; unsupported: string[] } {
   const cols = columnsOf(list);
-  const rows = list.map((r, i) => [String(i + 1), fmtTime(r.capturedAt), ...cols.map((c) => r.data[c] ?? '')]);
-  const bytes = Pdf.table({
+  const columns = ['#', 'Captured', ...cols];
+  const toRows = (rows: Row[]): string[][] => rows.map((r, i) => [String(i + 1), fmtTime(r.capturedAt), ...cols.map((c) => r.data[c] ?? '')]);
+  const totalRow = (label: string, total: number): string[] | undefined =>
+    sumBy ? ['', label, ...cols.map((c) => (c === sumBy ? formatNumber(total) : ''))] : undefined;
+
+  const s = summarize(list, groupBy, sumBy);
+  const grouped = groupBy && s.groups.length >= 2;
+  const totalText = sumBy ? ` · total ${sumBy}: ${formatNumber(s.total)}` : '';
+  const sections: ReportSection[] = [];
+
+  if (grouped) {
+    const groupsWord = `${groupBy.toLowerCase()}${/s$/i.test(groupBy) ? '' : 's'}`;
+    sections.push({
+      heading: `Summary by ${groupBy}`,
+      columns: [groupBy, 'Rows', ...(sumBy ? [`Total ${sumBy}`] : [])],
+      rows: s.groups.map((g) => [g.label, String(g.rows.length), ...(sumBy ? [formatNumber(g.total)] : [])]),
+      totalRow: [`All ${groupsWord}`, String(s.count), ...(sumBy ? [formatNumber(s.total)] : [])],
+    });
+    sections.push({
+      heading: `All ${groupsWord}`,
+      note: `${plural(s.count, 'row')}${totalText}`,
+      columns,
+      rows: toRows(list),
+      totalRow: totalRow(`Total (${plural(s.count, 'row')})`, s.total),
+    });
+    for (const g of s.groups) {
+      sections.push({
+        heading: `${groupBy}: ${g.label}`,
+        note: `${plural(g.rows.length, 'row')}${sumBy ? ` · total ${sumBy}: ${formatNumber(g.total)}` : ''}`,
+        columns,
+        rows: toRows(g.rows),
+        totalRow: totalRow(`Total ${g.label}`, g.total),
+      });
+    }
+  } else {
+    sections.push({ columns, rows: toRows(list), totalRow: totalRow(`Total (${plural(list.length, 'row')})`, s.total) });
+  }
+
+  const bytes = Pdf.report({
     title: name,
-    subtitle: `${list.length} row${list.length === 1 ? '' : 's'} · ${cols.length} column${cols.length === 1 ? '' : 's'} · exported ${new Date().toLocaleString()}`,
-    columns: ['#', 'Captured', ...cols],
-    rows,
+    subtitle:
+      `${plural(list.length, 'row')} · ${plural(cols.length, 'column')}` +
+      (grouped ? ` · ${plural(s.groups.length, groupBy.toLowerCase())}` : '') +
+      totalText +
+      ` · exported ${new Date().toLocaleString()}`,
+    sections,
     footer: 'Clipboard Extractor',
   });
-  return { bytes, unsupported: Pdf.unsupported(name + cols.join('') + rows.flat().join('')) };
+  const allText = name + sections.map((sec) => [sec.heading, sec.note, ...sec.columns, ...sec.rows.flat(), ...(sec.totalRow || [])].join('')).join('');
+  return { bytes, unsupported: Pdf.unsupported(allText) };
 }
 
 /** Project file contents (also what "Open from file" reads). */

@@ -387,29 +387,29 @@ dialog.sheet { padding: 8px 12px 12px; width: min(420px, calc(100vw - 32px)); }
   .summary { margin-left: 2px; }
 
   /* table -> cards */
-  .table-wrap { background: transparent; border: 0; overflow: visible; max-height: none; }
-  #table thead { display: none; }
-  #table, #table tbody, #table tr, #table td { display: block; width: 100%; }
-  #table tr {
+  .table-wrap.cards { background: transparent; border: 0; overflow: visible; max-height: none; }
+  .table-wrap.cards #table thead { display: none; }
+  .table-wrap.cards #table, .table-wrap.cards #table tbody, .table-wrap.cards #table tr, .table-wrap.cards #table td { display: block; width: 100%; }
+  .table-wrap.cards #table tr {
     position: relative; margin: 0 0 10px; padding: 10px 12px 8px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   }
-  #table tr.alt td { background: transparent; }
-  #table tr.alt { box-shadow: inset 3px 0 0 var(--accent-soft); }
-  #table td { border: 0; padding: 3px 0; }
-  #table td.meta.num { display: none; }
-  #table td.meta.time { font-size: 12px; padding: 0 64px 6px 0; }
-  #table td.cell, #table td.source {
+  .table-wrap.cards #table tr.alt td { background: transparent; }
+  .table-wrap.cards #table tr.alt { box-shadow: inset 3px 0 0 var(--accent-soft); }
+  .table-wrap.cards #table td { border: 0; padding: 3px 0; }
+  .table-wrap.cards #table td.meta.num { display: none; }
+  .table-wrap.cards #table td.meta.time { font-size: 12px; padding: 0 64px 6px 0; }
+  .table-wrap.cards #table td.cell, .table-wrap.cards #table td.source {
     display: grid; grid-template-columns: minmax(84px, 34%) minmax(0, 1fr); gap: 10px; max-width: none; font-size: 15px;
   }
-  #table td.cell::before, #table td.source::before { content: attr(data-label); color: var(--muted); font-size: 13px; padding-top: 1px; overflow-wrap: anywhere; }
-  #table td.cell:empty { display: none; }
-  #table td.cell:empty::before { content: none; }
-  #table td.source { white-space: normal; font-size: 13px; }
-  #table td.source { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  #table td.source::before { display: none; }
-  #table td.actions { position: absolute; top: 4px; right: 4px; width: auto; padding: 0; display: flex; gap: 2px; }
-  #table td.actions button { padding: 8px 10px; }
+  .table-wrap.cards #table td.cell::before, .table-wrap.cards #table td.source::before { content: attr(data-label); color: var(--muted); font-size: 13px; padding-top: 1px; overflow-wrap: anywhere; }
+  .table-wrap.cards #table td.cell:empty { display: none; }
+  .table-wrap.cards #table td.cell:empty::before { content: none; }
+  .table-wrap.cards #table td.source { white-space: normal; font-size: 13px; }
+  .table-wrap.cards #table td.source { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .table-wrap.cards #table td.source::before { display: none; }
+  .table-wrap.cards #table td.actions { position: absolute; top: 4px; right: 4px; width: auto; padding: 0; display: flex; gap: 2px; }
+  .table-wrap.cards #table td.actions button { padding: 8px 10px; }
   .empty { padding: 32px 8px; }
 
   /* bottom bar */
@@ -503,3 +503,75 @@ button.autoread-stop { color: var(--danger); border-color: color-mix(in srgb, va
 button.autoread-stop:hover { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
 button.autoread-start { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); font-weight: 600; }
 button.autoread-start:hover { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); }
+
+/* ===== grouping (e.g. per Platform) and totals ===== */
+.viewbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.viewbar label { display: inline-flex; align-items: center; gap: 6px; }
+.viewbar select { color: var(--text); padding: 5px 8px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 5px 12px; background: var(--surface); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.touch-layout { display: none; }
+
+.group-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.gchip {
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); font-size: 13px;
+}
+.gchip span { color: var(--muted); }
+.gchip .gtotal { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.gchip.active { border-color: var(--accent); background: var(--accent-soft); }
+
+#table tbody.group tr.group-head th {
+  position: static; text-align: left; cursor: default; padding: 10px 10px 8px;
+  background: var(--accent-soft); border-top: 2px solid var(--accent); font-size: 14px; font-weight: 500;
+}
+#table tbody.group + tbody.group tr.group-head th { border-top-width: 2px; }
+#table tr.group-head .group-meta { margin-left: 12px; color: var(--muted); font-size: 13px; }
+#table tr.subtotal td, #table tr.grand-total td { font-weight: 700; background: var(--surface-2); font-variant-numeric: tabular-nums; }
+#table tr.subtotal td.total-label, #table tr.grand-total td.total-label { color: var(--text); white-space: nowrap; }
+#table tr.grand-total td { border-top: 2px solid var(--text); border-bottom: 0; }
+#table td.total-value { font-weight: 700; }
+#table td.cell.no-total:empty::before { content: none; }
+
+@media print {
+  .viewbar, .group-chips { display: none !important; }
+  #table tr.group-head th { background: #eef !important; }
+  #table tr.subtotal td, #table tr.grand-total td { background: #eee !important; }
+  #table tbody.group { break-inside: auto; }
+}
+
+@media (max-width: 700px) {
+  .touch-layout { display: inline-flex; margin-left: auto; }
+  .viewbar label { flex: 1 1 140px; }
+  .viewbar select { flex: 1; min-width: 0; }
+  .group-chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .gchip { flex: none; }
+
+  /* Table mode on phones: a real, compact table that scrolls sideways */
+  .table-wrap.as-table { max-height: none; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap.as-table #table { font-size: 13px; }
+  .table-wrap.as-table #table th, .table-wrap.as-table #table td { padding: 7px 8px; }
+  .table-wrap.as-table #table td.cell { min-width: 0; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .table-wrap.as-table #table .source-col, .table-wrap.as-table #table td.source { display: none; }
+  /* fit Date / Platform / Credit on screen: hide # and Captured */
+  .table-wrap.as-table #table .col-num, .table-wrap.as-table #table .col-time, .table-wrap.as-table #table td.meta { display: none; }
+  .table-wrap.as-table #table td.first-col.no-total::before { content: attr(data-total-label); white-space: nowrap; color: var(--text); font-weight: 700; }
+  .table-wrap.as-table #table td.actions button { padding: 4px 6px; }
+  .table-wrap.as-table #table tr.group-head th { position: sticky; left: 0; }
+  .table-wrap.as-table #table tr.group-head .group-meta { display: block; margin: 2px 0 0; }
+
+  /* Cards mode: group heading and totals as their own cards */
+  .table-wrap.cards #table tbody.group { margin-bottom: 14px; }
+  .table-wrap.cards #table tr.group-head { padding: 10px 12px; background: var(--accent-soft); border-color: var(--accent); }
+  .table-wrap.cards #table tr.group-head th { display: block; padding: 0; background: none; border: 0; }
+  .table-wrap.cards #table tr.subtotal, .table-wrap.cards #table tr.grand-total { background: var(--surface-2); padding: 8px 12px; }
+  .table-wrap.cards #table tr.subtotal td, .table-wrap.cards #table tr.grand-total td { background: none; border: 0; }
+  .table-wrap.cards #table tr.subtotal td.no-total, .table-wrap.cards #table tr.grand-total td.no-total,
+  .table-wrap.cards #table tr.subtotal td.meta.num, .table-wrap.cards #table tr.grand-total td.meta.num,
+  .table-wrap.cards #table tr.subtotal td.source, .table-wrap.cards #table tr.grand-total td.source,
+  .table-wrap.cards #table tr.subtotal td.actions, .table-wrap.cards #table tr.grand-total td.actions { display: none; }
+  .table-wrap.cards #table tr.subtotal td.total-label, .table-wrap.cards #table tr.grand-total td.total-label { font-size: 14px; padding: 0 0 2px; }
+  .table-wrap.cards #table tfoot { display: block; }
+}

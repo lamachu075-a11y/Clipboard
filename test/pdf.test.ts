@@ -59,3 +59,34 @@ test('unsupported() lists characters the PDF fonts cannot show', () => {
   assert.deepEqual(Pdf.unsupported('Hello € é'), []);
   assert.deepEqual(Pdf.unsupported('Mei 上海'), ['上', '海']);
 });
+
+test('grouped report: summary, all platforms, then each platform with its total', async (t) => {
+  const { pdfOf } = await import('../lib/projectio.ts');
+  let n = 0;
+  const row = (Platform: string, Credit: string) => ({ id: String(++n), clipId: 'c', capturedAt: Date.UTC(2026, 2, 9, 12, n), data: { Date: `March ${n}, 2026`, Platform, Credit }, source: '' });
+  const rows = [row('os', '5555'), row('android', '1,200'), row('os', '300.5'), row('ios', '45')];
+  const { bytes, unsupported } = pdfOf('Recharges', rows, { groupBy: 'Platform', sumBy: 'Credit' });
+  assert.deepEqual(unsupported, []);
+  const out = pdfText(bytes, t);
+  if (!out) return;
+  const text = out.replace(/\s+/g, ' ');
+  const order = ['Summary by Platform', 'All platforms', 'Platform: android', 'Platform: ios', 'Platform: os'];
+  let at = -1;
+  for (const s of order) {
+    const i = text.indexOf(s);
+    assert.ok(i > at, `"${s}" comes after the previous section`);
+    at = i;
+  }
+  for (const s of ['Total Credit', '7,100.5', 'Total os', '5,855.5', 'Total android', '1,200', 'Total ios', '4 rows', '3 platforms']) {
+    assert.ok(text.includes(s), s);
+  }
+});
+
+test('report without grouping: one table with a total row', async (t) => {
+  const { pdfOf } = await import('../lib/projectio.ts');
+  const rows = [1, 2].map((i) => ({ id: String(i), clipId: 'c', capturedAt: i, data: { Item: `x${i}`, Credit: String(i * 10) }, source: '' }));
+  const out = pdfText(pdfOf('Plain', rows, { sumBy: 'Credit' }).bytes, t);
+  if (!out) return;
+  assert.ok(out.includes('Total (2 rows)') && out.includes('30'));
+  assert.ok(!out.includes('Summary by'));
+});

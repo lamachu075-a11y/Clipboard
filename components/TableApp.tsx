@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Project, ProjectDoc, ProjectSummary, Row } from '../lib/types.ts';
+import type { Project, ProjectDoc, ProjectSummary, Row, ViewPrefs } from '../lib/types.ts';
 import { extract, normalizeSettings, rulesOf, sameRules } from '../lib/extractor.ts';
 import Store, { Library, columnsOf, uid } from '../lib/store.ts';
 import { BASE_PATH, download, pickTextFile, safeFileName, saveTextFile } from '../lib/files.ts';
 import { csvOf, fileOf, jsonOf, parseProject, pdfOf, sortedRows, tsvOf } from '../lib/projectio.ts';
+import { formatNumber, numericColumns, resolveGroupBy, resolveSumBy, summarize } from '../lib/summary.ts';
 import { Modal, ToastProvider, useDismiss, useIsTouch, useStored, useToast } from './common.tsx';
 import DataTable from './DataTable.tsx';
 import type { SortState } from './DataTable.tsx';
@@ -34,6 +35,9 @@ function TablePage() {
   const settings = useStored(() => Store.getSettings(), ['settings']);
   const rows = useStored(() => Store.getRows(), ['rows']);
   const project = useStored(() => Store.getProject(), ['project']);
+  const view = useStored(() => Store.getView(), ['view']);
+  /** Show only this group (lower-case key), or every group. */
+  const [onlyGroup, setOnlyGroup] = useState<string | null>(null);
 
   const [mode, setMode] = useState<Mode>('checking');
   const [focused, setFocused] = useState(true);
@@ -384,6 +388,20 @@ function TablePage() {
     return list;
   }, [rows, filter, sort]);
 
+  // ---------- grouping and totals (e.g. per Platform, total Credit) ----------
+
+  const setView = (changes: Partial<ViewPrefs>) => safely(() => Store.setView({ ...Store.getView(), ...changes }));
+  const groupBy = resolveGroupBy(rows, view.groupBy);
+  const sumBy = resolveSumBy(rows, view.sumBy);
+  const summary = useMemo(() => summarize(visible, groupBy, sumBy), [visible, groupBy, sumBy]);
+  const activeGroup = onlyGroup !== null && summary.groups.some((g) => g.key.toLowerCase() === onlyGroup) ? onlyGroup : null;
+  const shownGroups = activeGroup === null ? summary.groups : summary.groups.filter((g) => g.key.toLowerCase() === activeGroup);
+  /** What is on screen (and what downloads contain): every row, or one group's rows. */
+  const shown = activeGroup === null || !groupBy ? visible : shownGroups.flatMap((g) => g.rows);
+  const shownTotal = activeGroup === null ? summary.total : shownGroups.reduce((t, g) => t + g.total, 0);
+  /** Group / total columns for any list of rows (e.g. a saved project's). */
+  const reportColumns = (list: Row[]) => ({ groupBy: resolveGroupBy(list, view.groupBy), sumBy: resolveSumBy(list, view.sumBy) });
+
   const onSort = (key: string) => setSort((s): SortState => (s.col === key ? { col: key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col: key, dir: 'asc' }));
   const onEdit = (id: string, col: string, value: string) => {
     const next = Store.getRows().map((r) => {
@@ -411,9 +429,9 @@ function TablePage() {
 
   // ---------- downloads ----------
 
-  const downloadPdf = (name: string, list: Row[]) => {
+  const downloadPdf = (name: string, list: Row[], columns: { groupBy?: string; sumBy?: string } = reportColumns(list)) => {
     if (!list.length) return toast('Nothing to download yet');
-    const { bytes, unsupported } = pdfOf(name, list);
+    const { bytes, unsupported } = pdfOf(name, list, columns);
     download(`${safeFileName(name)}.pdf`, 'application/pdf', bytes);
     if (unsupported.length) {
       toast(`Some characters (${unsupported.slice(0, 5).join(' ')}) can't be shown in this PDF. Use Download → Print / Save as PDF for those.`);
@@ -438,9 +456,9 @@ function TablePage() {
   downloadProjectFileRef.current = () => downloadProjectFile(currentDoc());
 
   const DOWNLOADS = {
-    pdf: () => downloadPdf(project.name, visible),
-    csv: () => downloadCsv(project.name, visible),
-    json: () => (visible.length ? download(`${safeFileName(project.name)}-table.json`, 'application/json', jsonOf(visible)) : toast('Nothing to download yet')),
+    pdf: () => downloadPdf(project.name, shown, { groupBy, sumBy }),
+    csv: () => downloadCsv(project.name, shown),
+    json: () => (shown.length ? download(`${safeFileName(project.name)}-table.json`, 'application/json', jsonOf(shown)) : toast('Nothing to download yet')),
     file: () => downloadProjectFile(currentDoc()),
     print: () => (rows.length ? window.print() : toast('Nothing to print yet')),
     async app() {
@@ -467,7 +485,7 @@ function TablePage() {
 
   const copyTable = async () => {
     if (!rows.length) return toast('Nothing to copy');
-    const tsv = tsvOf(visible);
+    const tsv = tsvOf(shown);
     lastText.current = tsv; // don't re-import our own copy
     safely(() => Store.setLastText(tsv));
     try {
@@ -760,11 +778,45 @@ function TablePage() {
             ? `${visible.length === rows.length ? rows.length : visible.length + ' of ' + rows.length} rows · ${allCols.length} columns · from ${plural(clips, 'capture')}`
             : ''}
         </div>
-        <div className="table-wrap">
+        {hasRows ? (
+          <ViewBar
+            view={view}
+            columns={allCols}
+            numeric={numericColumns(rows)}
+            autoGroup={resolveGroupBy(rows, 'auto')}
+            autoSum={resolveSumBy(rows, 'auto')}
+            onChange={(changes) => {
+              setView(changes);
+              if ('groupBy' in changes) setOnlyGroup(null);
+            }}
+          />
+        ) : null}
+        {groupBy && summary.groups.length ? (
+          <div className="group-chips" id="groupChips" role="group" aria-label={`Show one ${groupBy}`}>
+            <button className={'gchip' + (activeGroup === null ? ' active' : '')} aria-pressed={activeGroup === null} onClick={() => setOnlyGroup(null)}>
+              <b>All</b> <span>{plural(summary.count, 'row')}</span>
+              {sumBy ? <span className="gtotal">{formatNumber(summary.total)}</span> : null}
+            </button>
+            {summary.groups.map((g) => {
+              const key = g.key.toLowerCase();
+              return (
+                <button key={key} className={'gchip' + (activeGroup === key ? ' active' : '')} aria-pressed={activeGroup === key} onClick={() => setOnlyGroup(activeGroup === key ? null : key)}>
+                  <b>{g.label}</b> <span>{plural(g.rows.length, 'row')}</span>
+                  {sumBy ? <span className="gtotal">{formatNumber(g.total)}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        <div className={'table-wrap ' + (view.mobileView === 'cards' ? 'cards' : 'as-table')}>
           {hasRows ? (
             <DataTable
               rows={rows}
-              list={visible}
+              list={shown}
+              groupBy={groupBy}
+              groups={shownGroups}
+              sumBy={sumBy}
+              total={shownTotal}
               keepSource={settings.keepSource}
               sort={sort}
               onSort={onSort}
@@ -842,7 +894,7 @@ function TablePage() {
                   <button className={current ? '' : 'primary'} disabled={current && !project.dirty} onClick={withDoc(p.id, openDoc)}>
                     Open
                   </button>
-                  <button title="Download as PDF" onClick={withDoc(p.id, (d) => downloadPdf(d.name, sortedRows(d.rows)))}>
+                  <button title="Download as PDF (grouped and totalled like the table)" onClick={withDoc(p.id, (d) => downloadPdf(d.name, sortedRows(d.rows)))}>
                     PDF
                   </button>
                   <button title="Download as CSV (Excel)" onClick={withDoc(p.id, (d) => downloadCsv(d.name, sortedRows(d.rows)))}>
@@ -918,6 +970,59 @@ function TablePage() {
           Close
         </button>
       </Modal>
+    </div>
+  );
+}
+
+interface ViewBarProps {
+  view: ViewPrefs;
+  columns: string[];
+  /** Columns that can be totalled. */
+  numeric: string[];
+  /** What "Auto" picks for these rows ('' if nothing). */
+  autoGroup: string;
+  autoSum: string;
+  onChange: (changes: Partial<ViewPrefs>) => void;
+}
+
+/** Group by / Total choices, and Table / Cards on phones. */
+function ViewBar({ view, columns, numeric, autoGroup, autoSum, onChange }: ViewBarProps) {
+  const groupValue = view.groupBy === 'auto' || view.groupBy === '' || columns.includes(view.groupBy) ? view.groupBy : 'auto';
+  const sumValue = view.sumBy === 'auto' || view.sumBy === '' || numeric.includes(view.sumBy) ? view.sumBy : 'auto';
+  return (
+    <div className="viewbar" id="viewbar">
+      <label>
+        Group by
+        <select id="groupBy" value={groupValue} onChange={(e) => onChange({ groupBy: e.target.value })}>
+          <option value="auto">Auto ({autoGroup || 'none'})</option>
+          <option value="">No grouping</option>
+          {columns.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Total
+        <select id="sumBy" value={sumValue} onChange={(e) => onChange({ sumBy: e.target.value })}>
+          <option value="auto">Auto ({autoSum || 'none'})</option>
+          <option value="">No total</option>
+          {numeric.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="seg touch-layout" role="group" aria-label="Show rows as">
+        <button id="viewTable" aria-pressed={view.mobileView === 'table'} onClick={() => onChange({ mobileView: 'table' })}>
+          ▦ Table
+        </button>
+        <button id="viewCards" aria-pressed={view.mobileView === 'cards'} onClick={() => onChange({ mobileView: 'cards' })}>
+          ▤ Cards
+        </button>
+      </div>
     </div>
   );
 }

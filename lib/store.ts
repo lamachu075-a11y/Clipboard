@@ -13,10 +13,13 @@
  * Changes made in another tab are broadcast through the `storage` event.
  */
 import { normalizeSettings, rowKey } from './extractor.ts';
-import type { Project, ProjectDoc, ProjectSummary, Row, RowData, Settings, SettingsInput } from './types.ts';
+import type { Project, ProjectDoc, ProjectSummary, Row, RowData, Settings, SettingsInput, ViewPrefs } from './types.ts';
+
+/** Group by Platform and total Credit automatically; phones show a table. */
+export const DEFAULT_VIEW: ViewPrefs = { groupBy: 'auto', sumBy: 'auto', mobileView: 'table' };
 
 /** Store keys that change: listeners get one of these. */
-export type StoreKey = 'settings' | 'rows' | 'project' | 'lastText' | 'library' | 'stats' | 'draft' | 'libraryVersion';
+export type StoreKey = 'settings' | 'rows' | 'project' | 'lastText' | 'library' | 'stats' | 'draft' | 'libraryVersion' | 'view';
 
 const PREFIX = 'clipboard-extractor:';
 const MAX_ROWS = 5000;
@@ -92,6 +95,16 @@ const Store = {
   setProject(project: Project): void {
     write('project', project);
     emit('project');
+  },
+
+  /** Table view choices: group by, total, phone layout. */
+  getView(): ViewPrefs {
+    const v = read<Partial<ViewPrefs> | null>('view', null);
+    return { ...DEFAULT_VIEW, ...(v || {}) };
+  },
+  setView(view: ViewPrefs): void {
+    write('view', view);
+    emit('view');
   },
 
   getDraft(): string | null {
