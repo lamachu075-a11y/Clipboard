@@ -15,6 +15,9 @@ code), so it can be hosted anywhere, e.g. on GitHub Pages. Everything stays in y
   click *Read clipboard*. Turning it ON in Chrome/Edge asks for clipboard permission right away.
 - **Stop / Start auto-read button** in the toolbar (also first in the phone's *More* menu, and
   **Alt+Shift+A** on the keyboard) switches automatic reading off and on. It stays off after a reload.
+  **Start** only picks up copies made after you press it: whatever was already on the clipboard is skipped.
+- **Only new content is captured:** copying the same text again adds nothing, and rows already in the
+  table are not added twice.
 - **Automatic clipboard reading.** Copy text anywhere, switch back to the app's tab, and the new
   data is already in the table. While the tab is focused it also checks the clipboard every second.
 - **Ctrl/⌘ + V anywhere on the page** adds whatever you paste. This works in every browser.

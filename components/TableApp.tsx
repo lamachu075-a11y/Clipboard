@@ -52,6 +52,21 @@ function TablePage() {
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const lastText = useRef(Store.getLastText());
+  /**
+   * Set when automatic reading is (re)started: the next read only records what is on
+   * the clipboard as the starting point, so only copies made after Start are added.
+   */
+  const needsBaseline = useRef(false);
+  /** Remember `text` as the last clipboard content seen (it won't be added). */
+  const setBaseline = useCallback((text: string) => {
+    lastText.current = text;
+    needsBaseline.current = false;
+    try {
+      Store.setLastText(text);
+    } catch {
+      /* storage full: the in-memory baseline still works */
+    }
+  }, []);
   const busy = useRef(false);
   const manualRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -207,7 +222,8 @@ function TablePage() {
       busy.current = true;
       try {
         const text = await navigator.clipboard.readText();
-        handleText(text, { force: manual });
+        if (!manual && needsBaseline.current) setBaseline(text);
+        else handleText(text, { force: manual });
         if (manual && modeRef.current === 'prompt') setMode('auto');
       } catch (e) {
         if (manual) {
@@ -221,7 +237,7 @@ function TablePage() {
         busy.current = false;
       }
     },
-    [detectMode, handleText, isTouch, toast]
+    [detectMode, handleText, isTouch, setBaseline, toast]
   );
   const readRef = useRef(readClipboard);
   readRef.current = readClipboard;
@@ -292,19 +308,50 @@ function TablePage() {
     if (!p.id) safely(() => Store.setProject(Object.assign(p, { id: uid() })));
   }, [safely]);
 
+  /**
+   * Start automatic reading: what is on the clipboard now becomes the starting point and is
+   * not added; only copies made after this are. Called from a click, so the browser can ask
+   * for clipboard permission.
+   */
+  const startReading = async () => {
+    needsBaseline.current = true;
+    if (!window.isSecureContext || !navigator.clipboard?.readText) return;
+    busy.current = true;
+    try {
+      setBaseline(await navigator.clipboard.readText());
+      if (modeRef.current !== 'auto') setMode(await detectMode());
+      toast('Auto-read is ON. Copies you make from now on are added; what was already on the clipboard is skipped.');
+    } catch (e) {
+      const m = await detectMode();
+      setMode(m);
+      if ((e as { name?: string } | null)?.name === 'NotAllowedError' && m !== 'auto') {
+        toast(`Clipboard access was not allowed. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V'} to add text instead.`);
+      }
+      // Otherwise (e.g. the tab lost focus) the next automatic read takes the baseline.
+    } finally {
+      busy.current = false;
+    }
+  };
+
   const setEnabled = (on: boolean) => {
+    prevEnabled.current = on; // this tab handles the start itself (see the effect below)
     safely(() => Store.saveSettings({ ...Store.getSettings(), enabled: on }));
-    if (!on) return toast('Auto-read is OFF. Copies are not read until you turn it back on.');
-    if (mode === 'prompt') return readClipboard(true); // this click lets the browser ask for permission
+    if (!on) return toast('Auto-read is OFF. Copies are not read until you press Start again.');
     if (mode === 'insecure') {
       return toast(`Browsers only allow automatic clipboard reading on https:// pages. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V on this page'} instead, or set up HTTPS.`);
     }
     if (mode === 'paste' || mode === 'denied') {
       return toast(`This browser doesn't let web pages read the clipboard automatically. ${isTouch ? 'Tap Paste' : 'Press Ctrl/⌘+V on this page'} instead.`);
     }
-    toast('Auto-read is ON. Copy text anywhere, then come back to this tab.');
-    setTimeout(() => readRef.current(), 0);
+    void startReading();
   };
+
+  // Turned on somewhere else (the admin panel or another tab): start from the current clipboard too.
+  const prevEnabled = useRef(settings.enabled);
+  useEffect(() => {
+    if (settings.enabled && !prevEnabled.current) needsBaseline.current = true;
+    prevEnabled.current = settings.enabled;
+  }, [settings.enabled]);
 
   // Alt+Shift+A starts / stops automatic reading.
   const setEnabledRef = useRef(setEnabled);
@@ -570,7 +617,7 @@ function TablePage() {
             <span id="statusText">{status[0]}</span>
           </span>
           {on && mode === 'prompt' ? (
-            <button className="primary" id="allow" onClick={() => readClipboard(true)}>
+            <button className="primary" id="allow" onClick={() => void startReading()}>
               Allow clipboard access
             </button>
           ) : null}
