@@ -3,20 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clipboard Table</title>
+    <title>Clipboard Extractor</title>
+    <meta name="description" content="Automatically reads your clipboard, extracts emails, phones, URLs, dates, amounts and custom fields, and collects them in a table." />
+    <meta name="theme-color" content="#2563eb" />
     <link rel="icon" href="icons/icon32.png" />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="stylesheet" href="table.css" />
+    <link rel="apple-touch-icon" href="icons/icon192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="css/app.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
         <img src="icons/icon32.png" alt="" width="24" height="24" />
         <h1>Clipboard Extractor</h1>
-        <label class="switch" title="Watch the clipboard"><input type="checkbox" id="enabled" /><span id="enabledLabel">Watching</span></label>
+        <label class="switch" title="Automatically read the clipboard"><input type="checkbox" id="enabled" /><span>Auto-read</span></label>
+        <span class="status" id="status" role="status"><span class="dot"></span><span id="statusText">Starting…</span></span>
+        <button class="primary" id="allow" hidden>Allow clipboard access</button>
       </div>
       <div class="tools">
-        <input type="search" id="search" placeholder="Filter rows…" />
+        <button id="readNow" title="Read the clipboard now, even if it was already captured">Read clipboard</button>
+        <input type="search" id="search" placeholder="Filter rows…" aria-label="Filter rows" />
         <button id="copyTsv" title="Copy the visible rows as tab-separated text (paste into Excel/Sheets)">Copy</button>
         <button id="exportCsv">Export CSV</button>
         <button id="exportJson">Export JSON</button>
@@ -47,9 +53,11 @@
         </table>
         <div class="empty" id="empty">
           <h2>No data yet</h2>
-          <p>Copy some text anywhere (Ctrl/⌘ + C). Emails, phone numbers, URLs, dates, amounts,
-          <code>Key: Value</code> lines and your custom fields are extracted into this table automatically.</p>
-          <p class="muted">Tip: one copy can create many rows: every contact in a list, every line of a spreadsheet.</p>
+          <p>Copy some text anywhere (Ctrl/⌘ + C), then come back to this tab. The clipboard is read
+          automatically, and emails, phone numbers, URLs, dates, amounts, <code>Key: Value</code> lines
+          and your custom fields land in this table.</p>
+          <p>You can also press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>V</kbd> anywhere on this page.</p>
+          <p class="muted">One copy can create many rows: every contact in a list, every line of a spreadsheet.</p>
         </div>
       </div>
     </main>
@@ -97,6 +105,7 @@
       <label class="check"><input type="checkbox" id="keepSource" /> Keep original clipboard text</label>
       <label class="field">Check clipboard every <span><input type="number" id="pollInterval" min="250" step="250" /> ms</span></label>
       <label class="field">Ignore text shorter than <span><input type="number" id="minLength" min="0" /> chars</span></label>
+      <p class="muted small">Browsers only allow reading the clipboard while this tab is focused. It is also read the moment you switch back to the tab.</p>
 
       <div class="row">
         <button id="resetSettings" class="danger">Reset to defaults</button>
@@ -106,8 +115,8 @@
 
     <div class="toast" id="toast" role="status"></div>
 
-    <script src="lib/extractor.js"></script>
-    <script src="lib/storage.js"></script>
-    <script src="table.js"></script>
+    <script src="js/extractor.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/app.js"></script>
   </body>
 </html>

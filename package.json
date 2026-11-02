@@ -2,10 +2,10 @@
   "name": "clipboard-extractor",
   "version": "1.0.0",
   "private": true,
-  "description": "Browser extension that watches the clipboard and extracts structured data into a table.",
+  "description": "Web app that reads the clipboard and extracts structured data into a table.",
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "package": "cd extension && zip -r ../clipboard-extractor.zip . -x '.*'"
+    "start": "python3 -m http.server 8080",
+    "test": "node --test test/*.test.js"
   },
   "license": "MIT"
 }

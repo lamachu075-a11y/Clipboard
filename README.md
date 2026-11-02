@@ -1,36 +1,61 @@
 # Clipboard Extractor
 
-A Chrome / Edge / Brave extension (Manifest V3) that **automatically reads your clipboard**,
-**extracts the data you care about**, and **collects it in a table**. A single copy can produce
-**many rows**: every contact in a list, every line of a spreadsheet, every email in a paragraph.
+A web app that **reads your clipboard automatically**, **extracts the data you care about**,
+and **collects it in a table**. One copy can produce **many rows**: every contact in a list,
+every line of a spreadsheet, every email in a paragraph.
+
+It's a static site (HTML, CSS and JavaScript, no build step, no server code), so you can open it
+locally or host it on GitHub Pages. Everything stays in your browser (`localStorage`).
 
 ## Features
 
-- **Automatic clipboard watching.** Copy anything, in the browser or any other app, and new
-  data appears in the table within about a second. Toggle it from the toolbar popup or the table page.
+- **Automatic clipboard reading.** Copy text anywhere, switch back to the app's tab, and the new
+  data is already in the table. While the tab is open and focused it also checks the clipboard every second.
+- **Ctrl/⌘ + V anywhere on the page** adds whatever you paste. This works in every browser.
 - **Built-in extractors:** Email, Phone, URL, Date, Amount/Currency, IP address, Hashtag.
 - **`Key: Value` lines** (e.g. `Name: Jane Doe`, `Company = Acme`) become their own columns.
-- **Custom fields:** add your own column with a regular expression, and optionally a capture group
+- **Custom fields:** your own column from a regular expression, with an optional capture group
   (e.g. `Order #(\d+)` with group `1`).
 - **Required fields:** keep only rows that contain e.g. an Email.
 - **Multiple rows from one clipboard:**
   - Spreadsheet copies (tab-separated) map 1:1 to rows, using the header row as column names.
   - Blank-line separated blocks, one record per line, or a custom delimiter.
-  - Several matches inside one record become one row per match, or are joined into one cell.
-- **Table:** live updates, sort by any column, filter, double-click a cell to edit, delete rows,
-  rows from the same copy are grouped by shading.
-- **Export:** CSV (opens in Excel), JSON, or *Copy* as tab-separated text to paste into Excel / Google Sheets.
-- **Manual input:** paste text into the "Paste text manually" box to preview and add it.
-- Duplicate rows are skipped (optional). Everything stays local in `chrome.storage`.
+  - Several matches in one record become one row per match, or are joined into one cell.
+- **Table:** sort by any column, filter, double-click a cell to edit, delete rows. Rows from the
+  same copy are shaded as a group. Open tabs stay in sync.
+- **Export:** CSV (opens in Excel), JSON, or **Copy** as tab-separated text for Excel / Google Sheets.
+- **Installable** as an app (PWA manifest): use "Install app" in Chrome or Edge, or "Add to Home Screen".
 
-## Install (unpacked)
+## Browser support for automatic reading
 
-1. Open `chrome://extensions` (or `edge://extensions`).
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select the `extension/` folder of this repo.
-4. Pin **Clipboard Extractor** to the toolbar. Click it, then **Open table** (shortcut: `Alt+Shift+C` opens the popup).
+Browsers only let a web page read the clipboard **while its tab is focused**, and only on
+`https://` or `http://localhost`.
 
-Copy some text, for example:
+| Browser | Behaviour |
+| --- | --- |
+| Chrome, Edge, Brave, Opera | Click **Allow clipboard access** once. After that, reading is automatic. |
+| Firefox, Safari | They ask for confirmation on every read, so the app uses **Ctrl/⌘ + V** on the page instead. |
+
+The status next to the title shows which mode is active.
+
+## Run it
+
+```bash
+npm start            # serves the app at http://localhost:8080 (needs Python 3)
+# or any static server, e.g.: npx serve .
+```
+
+You can also open `index.html` directly. Ctrl/⌘ + V always works that way, but automatic
+reading is only guaranteed on `localhost` or `https`.
+
+### Host on GitHub Pages
+
+The workflow in `.github/workflows/pages.yml` tests and deploys the site on every push to `main`.
+Turn it on once under **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
+## Try it
+
+Copy this text, then click back into the app:
 
 ```
 Name: John Smith
@@ -42,41 +67,15 @@ Email: jane@globex.io
 Phone: 020 7946 0958
 ```
 
-and two rows (Name, Email, Phone) appear in the table.
+Two rows (Name, Email, Phone) appear.
 
-## How it works
+## Project layout
 
-```
- clipboard ──► offscreen.html (execCommand('paste'))
-                    ▲  │ text
-       poll every   │  ▼
-       N ms    background.js (service worker)
-                    │  only when text changed
-                    ▼
-            lib/extractor.js  ──►  rows  ──►  chrome.storage.local  ──►  table.html / popup.html
-```
-
-- `extension/lib/extractor.js`: the extraction engine (pure JS, no browser APIs, unit tested).
-- `extension/lib/storage.js`: settings and row storage helpers.
-- `extension/background.js`: polls the clipboard through the offscreen document and stores new rows.
-- `extension/offscreen.*`: reads the system clipboard (MV3 service workers have no DOM).
-- `extension/table.*`: the table, export and settings UI. `extension/popup.*`: toolbar popup.
-
-### Permissions
-
-| Permission | Why |
+| Path | What it is |
 | --- | --- |
-| `clipboardRead` | read clipboard text in the background |
-| `clipboardWrite` | the table's *Copy* button |
-| `offscreen` | a hidden document that performs the clipboard read |
-| `storage`, `unlimitedStorage` | keep rows and settings locally |
-| `alarms` | restart watching if the browser suspends the service worker |
-
-No host permissions, no network access. Your data never leaves the browser.
-
-## Development
-
-```bash
-npm test          # unit tests for the extractor (Node 18+)
-npm run package   # zip the extension/ folder for the Chrome Web Store
-```
+| `index.html` | the app page |
+| `js/extractor.js` | extraction engine (pure JS, no DOM, unit tested) |
+| `js/store.js` | `localStorage` persistence, cross-tab change events |
+| `js/app.js` | clipboard watcher, table, export, settings |
+| `css/app.css` | styles (light and dark) |
+| `test/` | `npm test`: extractor unit tests (Node 18+) |
